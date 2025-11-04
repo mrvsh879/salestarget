@@ -1,449 +1,121 @@
-import React, { useEffect, useMemo, useState } from "react";
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Трекер плана продаж — MVP++</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #f8fafc; font-family: system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useEffect, useMemo, useState } = React;
 
-// ✅ Полный обновлённый код (MVP++) — без сокращений
-// Улучшения:
-// 1) Настройки месяца + расчёт по рабочим дням (вкл/выкл)
-// 2) Быстрые кнопки +1/+5 к факту
-// 3) Экспорт/Импорт данных (JSON) для переноса между браузерами
-// 4) Цветовой статус строк (зел/жёлт/красн) по Δ от графика
-// 5) Небольшие UX-улучшения и подсказки
+    function App() {
+      const DEFAULT_ITEMS = [
+        { id: 'de', name: 'Немцы', code: 'DE', target: 15, actual: 0 },
+        { id: 'ro', name: 'Румыны', code: 'RO', target: 10, actual: 0 },
+        { id: 'pl', name: 'Поляки', code: 'PL', target: 12, actual: 0 }
+      ];
 
-// ==== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====
-function parseMonthISO(iso) {
-  // iso вида "2025-11"
-  if (!iso) return null;
-  const [y, m] = iso.split("-").map(Number);
-  if (!y || !m) return null;
-  return { year: y, month: m - 1 };
-}
+      const LS_KEY = 'sales_mvp_progress_v1';
 
-function isWeekend(date) {
-  const d = date.getDay();
-  return d === 0 || d === 6; // вс/сб
-}
+      const [items, setItems] = useState(DEFAULT_ITEMS);
+      const [note, setNote] = useState('');
 
-function businessDaysInMonth(year, month) {
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  let business = 0;
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dt = new Date(year, month, day);
-    if (!isWeekend(dt)) business++;
-  }
-  return business;
-}
+      const meta = useMemo(() => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const dayOfMonth = now.getDate();
+        const monthProgress = dayOfMonth / daysInMonth;
+        const remainingDays = daysInMonth - dayOfMonth;
+        return { year, month, daysInMonth, dayOfMonth, monthProgress, remainingDays };
+      }, []);
 
-function businessDaysElapsed(year, month, upToDay) {
-  let business = 0;
-  for (let day = 1; day <= upToDay; day++) {
-    const dt = new Date(year, month, day);
-    if (!isWeekend(dt)) business++;
-  }
-  return business;
-}
+      useEffect(() => {
+        const saved = localStorage.getItem(LS_KEY);
+        if (saved) {
+          try { setItems(JSON.parse(saved)); } catch {}
+        }
+      }, []);
 
-function getMonthMeta({
-  customMonthISO = "",
-  useBusinessDays = false,
-} = {}) {
-  const now = new Date();
-  const currentY = now.getFullYear();
-  const currentM = now.getMonth();
-  const currentD = now.getDate();
+      useEffect(() => {
+        localStorage.setItem(LS_KEY, JSON.stringify(items));
+      }, [items]);
 
-  const parsed = parseMonthISO(customMonthISO);
-  const baseYear = parsed ? parsed.year : currentY;
-  const baseMonth = parsed ? parsed.month : currentM; // 0-11
+      const monthName = new Intl.DateTimeFormat('ru-RU', { month: 'long' }).format(new Date());
 
-  const daysInMonth = new Date(baseYear, baseMonth + 1, 0).getDate();
-
-  // Если выбран текущий месяц — считаем по текущему дню. Если другой месяц — считаем как завершённый месяц.
-  const sameMonth = baseYear === currentY && baseMonth === currentM;
-  const dayOfMonth = sameMonth ? currentD : daysInMonth;
-
-  let totalDays = daysInMonth;
-  let daysElapsed = dayOfMonth;
-
-  if (useBusinessDays) {
-    totalDays = businessDaysInMonth(baseYear, baseMonth);
-    daysElapsed = businessDaysElapsed(baseYear, baseMonth, dayOfMonth);
-  }
-
-  const monthProgress = totalDays > 0 ? daysElapsed / totalDays : 0; // 0..1
-  const remainingDays = Math.max(totalDays - daysElapsed, 0);
-
-  return {
-    year: baseYear,
-    month: baseMonth,
-    daysInMonth,
-    dayOfMonth,
-    totalDays,
-    daysElapsed,
-    monthProgress,
-    remainingDays,
-    sameMonth,
-  };
-}
-
-function pct(n) {
-  if (!isFinite(n)) return "0%";
-  return (n * 100).toFixed(0) + "%";
-}
-
-function toNum(v, fallback = 0) {
-  const n = Number(v);
-  return isFinite(n) ? n : fallback;
-}
-
-/** @typedef {{ id: string, name: string, code: string, target: number, actual: number }} TrackItem */
-
-const DEFAULT_ITEMS = /** @type {TrackItem[]} */ ([
-  { id: "de", name: "Немцы", code: "DE", target: 15, actual: 0 },
-  { id: "ro", name: "Румыны", code: "RO", target: 10, actual: 0 },
-  { id: "pl", name: "Поляки", code: "PL", target: 12, actual: 0 },
-]);
-
-const LS_KEY = "sales_mvp_progress_v2"; // новая версия хранения
-
-export default function App() {
-  const [items, setItems] = useState(DEFAULT_ITEMS);
-  const [note, setNote] = useState("");
-  const [customMonthISO, setCustomMonthISO] = useState(""); // input type="month"
-  const [useBusinessDays, setUseBusinessDays] = useState(false);
-  const [showIO, setShowIO] = useState(false);
-  const [ioText, setIoText] = useState("");
-
-  // Загрузка
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed?.items)) setItems(parsed.items);
-        if (typeof parsed?.note === "string") setNote(parsed.note);
-        if (typeof parsed?.customMonthISO === "string") setCustomMonthISO(parsed.customMonthISO);
-        if (typeof parsed?.useBusinessDays === "boolean") setUseBusinessDays(parsed.useBusinessDays);
+      function updateItem(id, patch) {
+        setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it));
       }
-    } catch {}
-  }, []);
 
-  // Сохранение
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        LS_KEY,
-        JSON.stringify({ items, note, customMonthISO, useBusinessDays })
-      );
-    } catch {}
-  }, [items, note, customMonthISO, useBusinessDays]);
+      const totals = useMemo(() => {
+        const target = items.reduce((s, i) => s + Number(i.target || 0), 0);
+        const actual = items.reduce((s, i) => s + Number(i.actual || 0), 0);
+        const expected = target * meta.monthProgress;
+        const delta = actual - expected;
+        const projected = actual / meta.dayOfMonth * meta.daysInMonth;
+        return { target, actual, expected, delta, projected };
+      }, [items, meta]);
 
-  const meta = useMemo(
-    () => getMonthMeta({ customMonthISO, useBusinessDays }),
-    [customMonthISO, useBusinessDays]
-  );
+      return (
+        <div className="max-w-5xl mx-auto p-6">
+          <h1 className="text-3xl font-bold mb-4">Трекер плана продаж — MVP</h1>
+          <p className="text-slate-600 mb-6">Месяц: {monthName} {meta.year} — День {meta.dayOfMonth} из {meta.daysInMonth}</p>
 
-  function updateItem(id, patch) {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
-  }
-
-  function addItem() {
-    const i = items.length + 1;
-    const id = `n${i}`;
-    setItems((prev) => [
-      ...prev,
-      { id, name: `Направление ${i}`, code: `N${i}`, target: 10, actual: 0 },
-    ]);
-  }
-
-  function resetToDefaults() {
-    setItems(DEFAULT_ITEMS);
-    setNote("");
-    setCustomMonthISO("");
-    setUseBusinessDays(false);
-  }
-
-  function quickAdd(id, inc) {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, actual: toNum(it.actual) + inc } : it)));
-  }
-
-  // Экспорт/Импорт
-  function exportData() {
-    const payload = JSON.stringify({ items, note, customMonthISO, useBusinessDays }, null, 2);
-    setIoText(payload);
-    setShowIO(true);
-  }
-
-  function importData() {
-    try {
-      const parsed = JSON.parse(ioText);
-      if (Array.isArray(parsed?.items)) setItems(parsed.items);
-      if (typeof parsed?.note === "string") setNote(parsed.note);
-      if (typeof parsed?.customMonthISO === "string") setCustomMonthISO(parsed.customMonthISO);
-      if (typeof parsed?.useBusinessDays === "boolean") setUseBusinessDays(parsed.useBusinessDays);
-      alert("Импорт выполнен");
-      setShowIO(false);
-    } catch (e) {
-      alert("Ошибка импорта JSON");
-    }
-  }
-
-  const monthName = new Intl.DateTimeFormat("ru-RU", { month: "long" }).format(
-    new Date(meta.year, meta.month, 1)
-  );
-
-  // Совокупные итоги
-  const totals = useMemo(() => {
-    const target = items.reduce((s, it) => s + toNum(it.target), 0);
-    const actual = items.reduce((s, it) => s + toNum(it.actual), 0);
-    const expectedNow = target * meta.monthProgress;
-    const delta = actual - expectedNow;
-    const pacePerDay = meta.daysElapsed ? actual / meta.daysElapsed : 0; // темп по (рабочим/календарным) дням
-    const projected = pacePerDay * meta.totalDays;
-    const needTotal = Math.max(target - actual, 0);
-    const needPerDay = meta.remainingDays > 0 ? needTotal / meta.remainingDays : needTotal;
-    return { target, actual, expectedNow, delta, pacePerDay, projected, needTotal, needPerDay };
-  }, [items, meta]);
-
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">Трекер плана продаж — MVP++</h1>
-          <p className="text-sm text-slate-600">
-            Месяц: {monthName} {meta.year} • День {meta.dayOfMonth} из {meta.daysInMonth}
-            {" "}({pct(meta.monthProgress)} {useBusinessDays ? "раб.дней" : "месяца"})
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={addItem} className="px-3 py-2 rounded-xl bg-white border shadow-sm hover:shadow">+ Направление</button>
-          <button onClick={exportData} className="px-3 py-2 rounded-xl bg-white border shadow-sm hover:shadow">Экспорт</button>
-          <button onClick={() => { setShowIO(true); setIoText(""); }} className="px-3 py-2 rounded-xl bg-white border shadow-sm hover:shadow">Импорт</button>
-          <button onClick={resetToDefaults} className="px-3 py-2 rounded-xl bg-white border shadow-sm hover:shadow">Сброс</button>
-        </div>
-      </header>
-
-      {/* Панель настроек */}
-      <section className="max-w-6xl mx-auto px-4 -mt-2 mb-4">
-        <div className="p-4 rounded-2xl bg-white border shadow-sm flex flex-col md:flex-row md:items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-700 w-28">Месяц</label>
-            <input
-              type="month"
-              className="border rounded-xl px-3 py-2"
-              value={customMonthISO}
-              onChange={(e) => setCustomMonthISO(e.target.value)}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+            <Summary title="План" value={totals.target.toFixed(1)} />
+            <Summary title="Факт" value={totals.actual.toFixed(1)} />
+            <Summary title="Прогноз" value={totals.projected.toFixed(1)} />
           </div>
-          <div className="flex items-center gap-2">
-            <input id="biz" type="checkbox" className="scale-110" checked={useBusinessDays} onChange={(e) => setUseBusinessDays(e.target.checked)} />
-            <label htmlFor="biz" className="text-sm text-slate-700">Считать по рабочим дням (пн–пт)</label>
-          </div>
-          <div className="text-xs text-slate-500 ml-auto">
-            Подсказка: если выбран не текущий месяц — считаем как полный (100%).
-          </div>
-        </div>
-      </section>
 
-      {/* Итоги */}
-      <section className="max-w-6xl mx-auto px-4 grid md:grid-cols-5 gap-4">
-        <SummaryCard title="План (сумма)" value={totals.target.toFixed(0)} sub={`${monthName}`} />
-        <SummaryCard title="Факт (сумма)" value={totals.actual.toFixed(0)} sub={useBusinessDays ? "по раб.дням" : "на сегодня"} />
-        <SummaryCard title="Ожидалось к дате" value={totals.expectedNow.toFixed(1)} sub={`${pct(meta.monthProgress)} ${useBusinessDays ? "раб.дней" : "месяца"}`} />
-        <SummaryCard title={totals.delta >= 0 ? "Опережение" : "Отставание"} value={totals.delta.toFixed(1)} highlight={totals.delta >= 0 ? "good" : "bad"} sub="от графика" />
-        <SummaryCard title="Прогноз на месяц" value={totals.projected.toFixed(1)} sub={`темп ${totals.pacePerDay.toFixed(2)}/${useBusinessDays ? "раб.д" : "день"}`} />
-      </section>
-
-      {/* Нужный темп до конца месяца */}
-      <section className="max-w-6xl mx-auto px-4 mt-4">
-        <div className="p-4 rounded-2xl bg-white border shadow-sm">
-          <p className="text-sm text-slate-700">Осталось {useBusinessDays ? "раб.дней" : "дней"}: <b>{meta.remainingDays}</b>. Нужно добрать: <b>{totals.needTotal.toFixed(0)}</b> ⇒ Нужный темп: <b>{isFinite(totals.needPerDay) ? totals.needPerDay.toFixed(2) : "—"}</b> в {useBusinessDays ? "раб.день" : "день"}.</p>
-        </div>
-      </section>
-
-      {/* Таблица направлений */}
-      <section className="max-w-6xl mx-auto px-4 mt-6">
-        <div className="overflow-x-auto">
-          <table className="w-full border-separate border-spacing-y-3">
+          <table className="w-full text-sm border-separate border-spacing-y-2">
             <thead>
-              <tr className="text-left text-slate-600 text-sm">
-                <th className="px-3">Направление</th>
-                <th className="px-3">План</th>
-                <th className="px-3">Факт</th>
-                <th className="px-3">Ожидалось к дате</th>
-                <th className="px-3">Δ от графика</th>
-                <th className="px-3">Прогноз</th>
-                <th className="px-3">Нужно/день</th>
+              <tr className="text-left text-slate-500">
+                <th>Направление</th>
+                <th>План</th>
+                <th>Факт</th>
+                <th>Отклонение</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
-                <Row key={it.id} item={it} onChange={updateItem} meta={meta} useBusinessDays={useBusinessDays} onQuickAdd={quickAdd} />
+              {items.map(it => (
+                <tr key={it.id} className="bg-white shadow-sm rounded-xl">
+                  <td className="p-2 font-medium">{it.name}</td>
+                  <td className="p-2"><input type="number" value={it.target} onChange={e=>updateItem(it.id,{target:Number(e.target.value)})} className="border rounded px-2 w-20" /></td>
+                  <td className="p-2"><input type="number" value={it.actual} onChange={e=>updateItem(it.id,{actual:Number(e.target.value)})} className="border rounded px-2 w-20" /></td>
+                  <td className="p-2 text-sm {it.actual>=it.target?'text-green-600':'text-red-600'}">{(it.actual - it.target).toFixed(1)}</td>
+                </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      </section>
 
-      {/* Заметки */}
-      <section className="max-w-6xl mx-auto px-4 my-8">
-        <div className="bg-white border shadow-sm rounded-2xl p-4">
-          <label className="text-sm font-medium text-slate-700">Заметка / Правила расчёта / KPI</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Например: 1 сделка = 1, учитываем только оплаченные..."
-            className="mt-2 w-full min-h-[90px] rounded-xl border px-3 py-2"
-          />
-        </div>
-      </section>
-
-      {/* Модал импорта/экспорта */}
-      {showIO && (
-        <div className="fixed inset-0 bg-black/30 grid place-items-center p-4">
-          <div className="bg-white rounded-2xl border shadow-xl max-w-3xl w-full p-4 flex flex-col gap-3">
-            <div className="text-lg font-semibold">Импорт / Экспорт JSON</div>
-            <textarea className="w-full min-h-[220px] border rounded-xl p-3 font-mono text-sm" value={ioText} onChange={(e) => setIoText(e.target.value)} />
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowIO(false)} className="px-3 py-2 rounded-xl bg-white border shadow-sm hover:shadow">Закрыть</button>
-              <button onClick={importData} className="px-3 py-2 rounded-xl bg-indigo-600 text-white shadow-sm hover:shadow">Импортировать</button>
-              <button onClick={exportData} className="px-3 py-2 rounded-xl bg-white border shadow-sm hover:shadow">Сгенерировать JSON</button>
-            </div>
+          <div className="mt-6">
+            <label className="text-sm text-slate-600">Заметка / комментарий</label>
+            <textarea value={note} onChange={e=>setNote(e.target.value)} className="w-full border rounded-xl p-2 mt-1" />
           </div>
         </div>
-      )}
+      );
+    }
 
-      <footer className="text-center text-xs text-slate-500 pb-8">
-        Сделано как MVP++. Готово к деплою на GitHub Pages (один файл). Можно добавить роли/логины, выгрузку в CSV и графики.
-      </footer>
-    </div>
-  );
-}
-
-function SummaryCard({ title, value, sub, highlight }) {
-  const ring = highlight === "good" ? "ring-green-500/30" : highlight === "bad" ? "ring-red-500/30" : "ring-slate-300/40";
-  const text = highlight === "good" ? "text-green-700" : highlight === "bad" ? "text-red-700" : "text-slate-900";
-  return (
-    <div className={`bg-white border shadow-sm rounded-2xl p-4 ring-2 ${ring}`}>
-      <div className="text-xs uppercase tracking-wide text-slate-500">{title}</div>
-      <div className={`text-2xl font-bold ${text}`}>{value}</div>
-      {sub && <div className="text-xs text-slate-500 mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-function statusColor(delta, target) {
-  const band = Math.max(1, target * 0.1); // допуск ±10% по цели
-  if (delta >= -band && delta <= band) return "warn"; // около графика
-  if (delta > band) return "good";
-  return "bad";
-}
-
-function Row({ item, meta, onChange, onQuickAdd }) {
-  const target = toNum(item.target);
-  const actual = toNum(item.actual);
-  const expected = target * meta.monthProgress;
-  const delta = actual - expected;
-  const col = statusColor(delta, target);
-  const pacePerDay = meta.daysElapsed ? actual / meta.daysElapsed : 0;
-  const projected = pacePerDay * meta.totalDays;
-  const need = Math.max(target - actual, 0);
-  const needPerDay = meta.remainingDays > 0 ? need / meta.remainingDays : need;
-  const progress = target > 0 ? Math.min(actual / target, 1) : 0;
-
-  const ring = col === "good" ? "ring-green-500/20" : col === "warn" ? "ring-amber-500/20" : "ring-red-500/20";
-
-  return (
-    <tr>
-      <td className="align-top">
-        <div className={`bg-white border rounded-2xl p-3 flex items-center gap-3 ring-2 ${ring}`}>
-          <Badge code={item.code} />
-          <div className="font-medium">{item.name}</div>
+    function Summary({title, value}) {
+      return (
+        <div className="bg-white border rounded-xl p-4 shadow-sm">
+          <div className="text-xs text-slate-500">{title}</div>
+          <div className="text-2xl font-bold">{value}</div>
         </div>
-      </td>
+      );
+    }
 
-      <td className="align-top">
-        <NumInput value={target} ariaLabel="План" onChange={(v) => onChange(item.id, { target: v })} />
-      </td>
-
-      <td className="align-top">
-        <NumInput value={actual} ariaLabel="Факт" onChange={(v) => onChange(item.id, { actual: v })} />
-        <div className="flex gap-2 mt-2">
-          <button onClick={() => onQuickAdd(item.id, 1)} className="px-2 py-1 rounded-lg bg-white border shadow-sm text-sm">+1</button>
-          <button onClick={() => onQuickAdd(item.id, 5)} className="px-2 py-1 rounded-lg bg-white border shadow-sm text-sm">+5</button>
-        </div>
-        <ProgressBar value={progress} />
-      </td>
-
-      <td className="align-top">
-        <KPIBox title="ожидалось" value={expected.toFixed(1)} sub={`${pct(meta.monthProgress)} ${meta.sameMonth ? (meta.totalDays === meta.daysInMonth ? "месяца" : "раб.дней") : "от месяца"}`} />
-      </td>
-
-      <td className="align-top">
-        <DeltaBox delta={delta} />
-      </td>
-
-      <td className="align-top">
-        <KPIBox title="прогноз" value={projected.toFixed(1)} sub={`${pacePerDay.toFixed(2)}/${meta.totalDays === meta.daysInMonth ? "день" : "раб.д"}`} />
-      </td>
-
-      <td className="align-top">
-        <KPIBox title="нужно/день" value={isFinite(needPerDay) ? needPerDay.toFixed(2) : "—"} sub={`ост. ${meta.remainingDays} ${meta.totalDays === meta.daysInMonth ? "дн." : "раб.дн."}`} />
-      </td>
-    </tr>
-  );
-}
-
-function Badge({ code }) {
-  return (
-    <div className="w-9 h-9 rounded-2xl bg-slate-900 text-white grid place-items-center text-sm font-bold">
-      {code}
-    </div>
-  );
-}
-
-function NumInput({ value, onChange, ariaLabel }) {
-  return (
-    <div className="bg-white border rounded-2xl p-2 w-40">
-      <label className="text-[11px] text-slate-500">{ariaLabel}</label>
-      <input
-        type="number"
-        inputMode="numeric"
-        className="w-full outline-none text-slate-900 font-semibold"
-        value={value}
-        onChange={(e) => onChange(toNum(e.target.value, 0))}
-      />
-    </div>
-  );
-}
-
-function ProgressBar({ value }) {
-  return (
-    <div className="mt-2 h-2 rounded-full bg-slate-200 w-40 overflow-hidden">
-      <div
-        className="h-full bg-gradient-to-r from-indigo-500 to-blue-500"
-        style={{ width: `${Math.min(100, Math.max(0, value * 100)).toFixed(0)}%` }}
-      />
-    </div>
-  );
-}
-
-function KPIBox({ title, value, sub }) {
-  return (
-    <div className="bg-white border rounded-2xl p-3 min-w-[160px]">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{title}</div>
-      <div className="text-lg font-semibold">{value}</div>
-      {sub && <div className="text-[11px] text-slate-500 mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-function DeltaBox({ delta }) {
-  const col = delta >= 0 ? "text-green-700" : "text-red-700";
-  const ring = delta >= 0 ? "ring-green-500/30" : "ring-red-500/30";
-  return (
-    <div className={`bg-white border rounded-2xl p-3 min-w-[160px] ring-2 ${ring}`}>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">Δ от графика</div>
-      <div className={`text-lg font-semibold ${col}`}>{delta.toFixed(1)}</div>
-      <div className="text-[11px] text-slate-500 mt-1">+ хорошо / − отстаём</div>
-    </div>
-  );
-}
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
