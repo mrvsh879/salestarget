@@ -11,7 +11,7 @@
     <header class="top">
       <div>
         <h1>План месяца</h1>
-        <p class="sub">Считает остаток и дневную норму с учетом выходных (Сб/Вс).</p>
+        <p class="sub">Считает остаток и дневную норму с учетом выходных (Сб/Вс) + детализация по командам.</p>
       </div>
       <div class="topActions">
         <button id="btnExport" class="btn ghost">Экспорт JSON</button>
@@ -96,30 +96,35 @@
 
     <section class="card">
       <div class="cardHead">
-        <h2>Команды и распределение плана</h2>
+        <h2>Команды: план / факт / остаток / нужно в день</h2>
         <div class="right">
           <button id="btnAddTeam" class="btn ghost">+ Добавить команду</button>
         </div>
       </div>
 
       <div class="hint">
-        Укажи план по командам. Можно вводить числа — сумма покажется ниже. Данные сохраняются для выбранного месяца.
+        Вводи план и факт по каждой команде — система покажет остаток и дневную норму (на оставшиеся рабочие дни).
+        Данные сохраняются для выбранного месяца.
       </div>
 
       <div class="table" id="teamsTable"></div>
 
       <div class="sumRow">
         <div class="sumBox">
-          <div class="k">Сумма по командам</div>
-          <div class="v" id="teamsSum">0</div>
+          <div class="k">Сумма планов по командам</div>
+          <div class="v" id="teamsPlanSum">0</div>
         </div>
         <div class="sumBox">
-          <div class="k">Разница с планом</div>
+          <div class="k">Сумма факта по командам</div>
+          <div class="v" id="teamsDoneSum">0</div>
+        </div>
+        <div class="sumBox">
+          <div class="k">Разница (сумма планов - план месяца)</div>
           <div class="v" id="teamsDiff">0</div>
         </div>
         <div class="sumActions">
-          <button id="btnAutoSplit" class="btn">Равномерно распределить</button>
-          <button id="btnSaveTeams" class="btn ghost">Сохранить распределение</button>
+          <button id="btnAutoSplit" class="btn">Равномерно распределить планы</button>
+          <button id="btnSaveTeams" class="btn ghost">Сохранить команды</button>
         </div>
       </div>
     </section>
