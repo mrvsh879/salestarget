@@ -1,9 +1,11 @@
 :root{
   --bg:#0b1020;
+  --card:#121a33;
   --text:#e8ecff;
   --muted:#aab3d6;
   --line:rgba(255,255,255,.10);
   --accent:#7c5cff;
+  --accent2:#31d6c6;
   --danger:#ff5c7a;
   --ok:#37e08c;
   --shadow: 0 18px 60px rgba(0,0,0,.35);
@@ -15,7 +17,7 @@ body{
   margin:0;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Helvetica Neue", sans-serif;
   background: radial-gradient(1200px 600px at 20% 0%, rgba(124,92,255,.25), transparent 55%),
-              radial-gradient(900px 500px at 85% 10%, rgba(55,224,140,.10), transparent 60%),
+              radial-gradient(900px 500px at 85% 10%, rgba(49,214,198,.16), transparent 60%),
               var(--bg);
   color:var(--text);
 }
@@ -295,6 +297,11 @@ input:focus, select:focus, .inp:focus{border-color: rgba(124,92,255,.55); box-sh
   font-size:12.5px;
 }
 .calLine b{color:var(--text); font-weight:800}
+
+/* ✅ Calendar toggle */
+#calendarPanel.hidden{
+  display:none;
+}
 
 /* Modal */
 .modal{
