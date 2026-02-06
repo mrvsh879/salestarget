@@ -25,6 +25,10 @@
   const elCalendar = $("calendar");
   const btnClearCalendar = $("btnClearCalendar");
 
+  // ✅ calendar toggle
+  const btnToggleCalendar = $("btnToggleCalendar");
+  const elCalendarPanel = $("calendarPanel");
+
   // teams
   const elTeamsTable = $("teamsTable");
   const elTeamsPlanSum = $("teamsPlanSum");
@@ -160,9 +164,14 @@
 
   // prefs
   function getPrefs() {
-    const p = loadJson(KEY_PREFS, { includeWeekends: false, doneFromCalendar: true });
+    const p = loadJson(KEY_PREFS, {
+      includeWeekends: false,
+      doneFromCalendar: true,
+      calendarCollapsed: false
+    });
     if (typeof p.includeWeekends !== "boolean") p.includeWeekends = false;
     if (typeof p.doneFromCalendar !== "boolean") p.doneFromCalendar = true;
+    if (typeof p.calendarCollapsed !== "boolean") p.calendarCollapsed = false;
     return p;
   }
   function savePrefs(p) {
@@ -294,9 +303,9 @@
   }
 
   // Calendar: "Нужно сегодня" рассчитываем так:
-  // remainingLeftAtDay = plan - sum(done for days < current day)
-  // remainingWorkdaysFromDay = count from that day to end (с учетом выходных настройки)
-  // needToday = ceil(remainingLeftAtDay / remainingWorkdaysFromDay) для рабочих дней, иначе 0 (если выходные не рабочие)
+  // leftAtStart = plan - sum(done for days < current day)
+  // remWork = workdays from day..end
+  // needToday = ceil(leftAtStart / remWork) для рабочих дней, иначе 0 (если выходные не рабочие)
   function renderCalendar(year, month0, monthData, includeWeekends) {
     elCalendar.innerHTML = "";
 
@@ -316,13 +325,12 @@
       elCalendar.appendChild(head);
     }
 
-    // calculate offset: convert JS getDay (Sun=0) to Mon=1..Sun=7
+    // offset
     const firstDay = new Date(year, month0, 1);
-    const js = firstDay.getDay(); // 0..6 (Sun..Sat)
-    const mondayBased = js === 0 ? 7 : js; // 1..7 (Mon..Sun)
+    const js = firstDay.getDay(); // 0..6 Sun..Sat
+    const mondayBased = js === 0 ? 7 : js; // 1..7 Mon..Sun
     const offset = mondayBased - 1; // 0..6
 
-    // leading blanks
     for (let i = 0; i < offset; i++) {
       const blank = document.createElement("div");
       blank.className = "calCell disabled";
@@ -331,7 +339,7 @@
       elCalendar.appendChild(blank);
     }
 
-    // precompute cumulative sums of daily done
+    // cumulative sums
     const doneBefore = new Array(dim + 2).fill(0);
     for (let d = 1; d <= dim; d++) {
       const k = ymdKey(year, month0, d);
@@ -346,44 +354,36 @@
       const weekend = isWeekend(dateObj);
       const isWorkDay = includeWeekends ? true : !weekend;
 
-      const isPast = dateObj < today;
       const isToday = dateObj.getTime() === today.getTime();
-
       const k = ymdKey(year, month0, d);
       const doneVal = clamp0(Number(monthData.daily?.[k]));
 
-      // remaining left at start of this day (excluding current day done)
       const leftAtStart = Math.max(plan - doneBefore[d - 1], 0);
-
-      // remaining workdays from this day to end
       const remWork = countRemainingWorkdaysFromDate(year, month0, d, includeWeekends);
 
-      // need for this day
       let needToday = 0;
       if (plan > 0 && leftAtStart > 0) {
         if (isWorkDay) {
           if (remWork > 0) needToday = Math.ceil(leftAtStart / remWork);
-          else needToday = leftAtStart; // fallback
+          else needToday = leftAtStart;
         } else {
           needToday = 0;
         }
       }
 
-      const cell = document.createElement("div");
-      cell.className = "calCell" + (isPast ? "" : "");
-      if (!isWorkDay && !includeWeekends) {
-        // weekend, non-working
-        // keep clickable (for logging), but show weekend tag
-      }
-
       const tagClasses = ["calTag", (isWorkDay ? "wk" : "we")];
       if (isToday) tagClasses.push("today");
-
       const tagText = isToday ? "Сегодня" : (isWorkDay ? "Раб" : "Вых");
 
-      // lines:
-      // Done: X (if any)
-      // Need: Y (if workday and not past completed month)
+      const cell = document.createElement("div");
+      cell.className = "calCell";
+      cell.innerHTML = `
+        <div class="calTop">
+          <div class="calDay">${d}</div>
+          <div class="${tagClasses.join(" ")}">${tagText}</div>
+        </div>
+      `;
+
       const lines = document.createElement("div");
       lines.className = "calLines";
 
@@ -402,22 +402,15 @@
       l3.innerHTML = `<span>Остаток (с утра)</span><b>${plan === 0 ? "—" : fmtInt(leftAtStart)}</b>`;
       lines.appendChild(l3);
 
-      cell.innerHTML = `
-        <div class="calTop">
-          <div class="calDay">${d}</div>
-          <div class="${tagClasses.join(" ")}">${tagText}</div>
-        </div>
-      `;
       cell.appendChild(lines);
 
-      // disable click for header blanks only; days clickable always
       cell.addEventListener("click", () => openDayModal(year, month0, d));
 
       elCalendar.appendChild(cell);
     }
   }
 
-  // Teams (оставил как было: ручной ввод plan/done по командам)
+  // Teams sums
   function updateTeamsSums(monthData) {
     let planSum = 0;
     let doneSum = 0;
@@ -565,6 +558,15 @@
     elIncludeWeekends.checked = !!prefs.includeWeekends;
     elDoneFromCalendar.checked = !!prefs.doneFromCalendar;
 
+    // ✅ apply calendar collapsed state
+    if (prefs.calendarCollapsed) {
+      elCalendarPanel.classList.add("hidden");
+      btnToggleCalendar.textContent = "Показать календарь";
+    } else {
+      elCalendarPanel.classList.remove("hidden");
+      btnToggleCalendar.textContent = "Скрыть календарь";
+    }
+
     const { year, month0, ym } = currentSelection();
 
     let monthData;
@@ -600,7 +602,10 @@
 
     const { daysLeft } = computeAndRenderTotals(year, month0, monthData, prefs.includeWeekends);
 
+    // only render calendar UI if not collapsed (optimization not required, but ok)
+    // IMPORTANT: even if collapsed, calendar data still exists; we just hide panel.
     renderCalendar(year, month0, monthData, prefs.includeWeekends);
+
     renderTeamsTable(teams, monthData, daysLeft);
 
     window.__MVP__ = { teams, prefs, year, month0, ym, monthData };
@@ -664,6 +669,14 @@
     refreshAll(true);
   });
 
+  // ✅ toggle calendar
+  btnToggleCalendar.addEventListener("click", () => {
+    const prefs = getPrefs();
+    prefs.calendarCollapsed = !prefs.calendarCollapsed;
+    savePrefs(prefs);
+    refreshAll(true);
+  });
+
   btnSavePlan.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st) return;
@@ -675,7 +688,6 @@
   btnSaveDone.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st) return;
-    // если факт из календаря включен — ручное сохранение не нужно
     if (st.prefs.doneFromCalendar) {
       alert("Факт считается из календаря. Выключи “Факт из календаря”, если хочешь вводить вручную.");
       return;
@@ -814,17 +826,21 @@
 
       if (data && typeof data === "object") {
         if (Array.isArray(data.teams)) setTeams(data.teams);
+
         if (data.prefs && typeof data.prefs === "object") {
           savePrefs({
             includeWeekends: !!data.prefs.includeWeekends,
-            doneFromCalendar: (typeof data.prefs.doneFromCalendar === "boolean") ? data.prefs.doneFromCalendar : true
+            doneFromCalendar: (typeof data.prefs.doneFromCalendar === "boolean") ? data.prefs.doneFromCalendar : true,
+            calendarCollapsed: (typeof data.prefs.calendarCollapsed === "boolean") ? data.prefs.calendarCollapsed : false
           });
         }
+
         if (data.months && typeof data.months === "object") {
           for (const [ym, val] of Object.entries(data.months)) {
             saveJson(KEY_MONTH(ym), val);
           }
         }
+
         alert("Импорт выполнен.");
         refreshAll(true);
       } else {
