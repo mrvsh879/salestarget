@@ -164,11 +164,7 @@
   // monthData.teams[CODE] = { plan: number, done: number }
   function getMonthData(ym, teams) {
     const raw = loadJson(KEY_MONTH(ym), null);
-    const out = {
-      plan: 0,
-      done: 0,
-      teams: {}
-    };
+    const out = { plan: 0, done: 0, teams: {} };
 
     if (raw && typeof raw === "object") {
       out.plan = clamp0(Number(raw.plan));
@@ -176,8 +172,7 @@
       out.teams = (raw.teams && typeof raw.teams === "object") ? raw.teams : {};
     }
 
-    // MIGRATION:
-    // if teams[code] was a number -> interpret as plan, done=0
+    // MIGRATION: if teams[code] was number => plan, done=0
     for (const t of teams) {
       const v = out.teams[t];
       if (typeof v === "number") {
@@ -192,7 +187,7 @@
       }
     }
 
-    // persist migrated structure once
+    // persist migration once
     saveJson(KEY_MONTH(ym), out);
     return out;
   }
@@ -201,7 +196,7 @@
     saveJson(KEY_MONTH(ym), data);
   }
 
-  // UI
+  // UI: month/year pickers
   function fillMonthYearPickers() {
     const months = [
       "Январь","Февраль","Март","Апрель","Май","Июнь",
@@ -272,13 +267,37 @@
     return { daysLeft };
   }
 
-  function pill(text, kind) {
+  function pillEl() {
     const el = document.createElement("div");
-    el.className = "pill" + (kind ? ` ${kind}` : "");
-    el.textContent = text;
+    el.className = "pill";
+    el.textContent = "0";
     return el;
   }
 
+  function setPill(el, value, kind = "") {
+    el.className = "pill" + (kind ? ` ${kind}` : "");
+    el.textContent = value;
+  }
+
+  function updateTeamsSums(monthData) {
+    let planSum = 0;
+    let doneSum = 0;
+
+    for (const v of Object.values(monthData.teams || {})) {
+      if (v && typeof v === "object") {
+        planSum += clamp0(Number(v.plan));
+        doneSum += clamp0(Number(v.done));
+      }
+    }
+
+    elTeamsPlanSum.textContent = fmtInt(planSum);
+    elTeamsDoneSum.textContent = fmtInt(doneSum);
+
+    const diff = planSum - clamp0(Number(monthData.plan));
+    elTeamsDiff.textContent = (diff >= 0 ? "+" : "") + fmtInt(diff);
+  }
+
+  // Table rendering with live computed updates (NO reload from storage)
   function renderTeamsTable(teams, monthData, daysLeft) {
     elTeamsTable.innerHTML = "";
 
@@ -295,62 +314,85 @@
     elTeamsTable.appendChild(head);
 
     for (const code of teams) {
-      const rec = monthData.teams[code] || { plan: 0, done: 0 };
-      const teamPlan = clamp0(Number(rec.plan));
-      const teamDone = clamp0(Number(rec.done));
-      const teamLeft = Math.max(teamPlan - teamDone, 0);
-      const teamPerDay = daysLeft > 0 ? (teamLeft / daysLeft) : (teamLeft > 0 ? Infinity : 0);
-
       const tr = document.createElement("div");
       tr.className = "tr";
+      tr.dataset.team = code;
 
-      // code
+      const rec = monthData.teams[code] || (monthData.teams[code] = { plan: 0, done: 0 });
+
       const c = document.createElement("div");
       c.className = "code";
       c.textContent = code;
 
-      // plan input
       const planBox = document.createElement("div");
       const inpPlan = document.createElement("input");
       inpPlan.type = "number";
       inpPlan.min = "0";
       inpPlan.step = "1";
-      inpPlan.value = String(Math.round(teamPlan));
-      inpPlan.addEventListener("input", () => {
-        monthData.teams[code].plan = clamp0(Number(inpPlan.value));
-        refreshAll(false); // re-render, but don't reset inputs from storage
-      });
+      inpPlan.value = String(Math.round(clamp0(Number(rec.plan))));
       planBox.appendChild(inpPlan);
 
-      // done input
       const doneBox = document.createElement("div");
       const inpDone = document.createElement("input");
       inpDone.type = "number";
       inpDone.min = "0";
       inpDone.step = "1";
-      inpDone.value = String(Math.round(teamDone));
-      inpDone.addEventListener("input", () => {
-        monthData.teams[code].done = clamp0(Number(inpDone.value));
-        refreshAll(false);
-      });
+      inpDone.value = String(Math.round(clamp0(Number(rec.done))));
       doneBox.appendChild(inpDone);
 
-      // left pill
       const leftBox = document.createElement("div");
-      leftBox.appendChild(pill(fmtInt(teamLeft), teamLeft === 0 ? "ok" : ""));
+      const leftP = pillEl();
+      leftBox.appendChild(leftP);
 
-      // per day pill
       const perDayBox = document.createElement("div");
-      let perText = "0";
-      if (!Number.isFinite(teamPerDay)) perText = "∞";
-      else perText = fmtInt(teamPerDay);
-      perDayBox.appendChild(pill(perText, (teamLeft > 0 && daysLeft === 0) ? "bad" : ""));
+      const perP = pillEl();
+      perDayBox.appendChild(perP);
 
-      // delete
       const right = document.createElement("div");
       const del = document.createElement("button");
       del.className = "btn del";
       del.textContent = "Удалить";
+      right.appendChild(del);
+
+      tr.appendChild(c);
+      tr.appendChild(planBox);
+      tr.appendChild(doneBox);
+      tr.appendChild(leftBox);
+      tr.appendChild(perDayBox);
+      tr.appendChild(right);
+      elTeamsTable.appendChild(tr);
+
+      const recalcRow = () => {
+        const plan = clamp0(Number(monthData.teams[code].plan));
+        const done = clamp0(Number(monthData.teams[code].done));
+        const left = Math.max(plan - done, 0);
+        const per = daysLeft > 0 ? (left / daysLeft) : (left > 0 ? Infinity : 0);
+
+        setPill(leftP, fmtInt(left), left === 0 ? "ok" : "");
+        if (!Number.isFinite(per)) setPill(perP, "∞", "bad");
+        else setPill(perP, fmtInt(per), "");
+      };
+
+      // live input updates
+      inpPlan.addEventListener("input", () => {
+        monthData.teams[code].plan = clamp0(Number(inpPlan.value));
+        recalcRow();
+        updateTeamsSums(monthData);
+
+        // ✅ автосохранение при вводе (если не надо — удали следующую строку)
+        saveMonthData(window.__MVP__.ym, monthData);
+      });
+
+      inpDone.addEventListener("input", () => {
+        monthData.teams[code].done = clamp0(Number(inpDone.value));
+        recalcRow();
+        updateTeamsSums(monthData);
+
+        // ✅ автосохранение при вводе (если не надо — удали следующую строку)
+        saveMonthData(window.__MVP__.ym, monthData);
+      });
+
+      // delete
       del.addEventListener("click", () => {
         const curr = getTeams();
         const next = curr.filter(t => t !== code);
@@ -365,35 +407,12 @@
         saveMonthData(window.__MVP__.ym, monthData);
         refreshAll(true);
       });
-      right.appendChild(del);
 
-      tr.appendChild(c);
-      tr.appendChild(planBox);
-      tr.appendChild(doneBox);
-      tr.appendChild(leftBox);
-      tr.appendChild(perDayBox);
-      tr.appendChild(right);
-
-      elTeamsTable.appendChild(tr);
-    }
-  }
-
-  function updateTeamsSums(monthData, monthPlan) {
-    let planSum = 0;
-    let doneSum = 0;
-
-    for (const v of Object.values(monthData.teams || {})) {
-      if (v && typeof v === "object") {
-        planSum += clamp0(Number(v.plan));
-        doneSum += clamp0(Number(v.done));
-      }
+      // initial calc for row
+      recalcRow();
     }
 
-    elTeamsPlanSum.textContent = fmtInt(planSum);
-    elTeamsDoneSum.textContent = fmtInt(doneSum);
-
-    const diff = planSum - clamp0(Number(monthPlan));
-    elTeamsDiff.textContent = (diff >= 0 ? "+" : "") + fmtInt(diff);
+    updateTeamsSums(monthData);
   }
 
   function currentSelection() {
@@ -405,27 +424,32 @@
   function refreshAll(resetFromStorage = true) {
     const teams = getTeams();
     const prefs = getPrefs();
-
     elIncludeWeekends.checked = !!prefs.includeWeekends;
 
     const { year, month0, ym } = currentSelection();
-    const monthData = getMonthData(ym, teams);
+
+    // IMPORTANT: load from storage ONLY when resetFromStorage === true
+    let monthData;
+    if (resetFromStorage || !window.__MVP__ || window.__MVP__.ym !== ym) {
+      monthData = getMonthData(ym, teams);
+    } else {
+      // keep in-memory monthData (so team edits won't be overwritten)
+      monthData = window.__MVP__.monthData;
+    }
 
     if (resetFromStorage) {
       elPlan.value = String(Math.round(monthData.plan || 0));
       elDone.value = String(Math.round(monthData.done || 0));
     } else {
-      // keep current top inputs, but sync into monthData
+      // sync top inputs to memory (without overwriting team edits)
       monthData.plan = clamp0(Number(elPlan.value));
       monthData.done = clamp0(Number(elDone.value));
     }
 
     renderMeta(year, month0, prefs.includeWeekends);
-
     const { daysLeft } = computeAndRenderTotals(year, month0, monthData, prefs.includeWeekends);
 
     renderTeamsTable(teams, monthData, daysLeft);
-    updateTeamsSums(monthData, monthData.plan);
 
     window.__MVP__ = { teams, prefs, year, month0, ym, monthData };
   }
@@ -469,7 +493,6 @@
   btnSaveTeams.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st) return;
-    // monthData already updated live
     saveMonthData(st.ym, st.monthData);
     alert("Команды сохранены.");
     refreshAll(true);
@@ -483,6 +506,7 @@
       alert("Сначала укажи план месяца.");
       return;
     }
+
     const t = st.teams;
     const base = Math.floor(plan / t.length);
     let rem = plan - base * t.length;
@@ -490,9 +514,9 @@
     for (const code of t) {
       const add = rem > 0 ? 1 : 0;
       st.monthData.teams[code].plan = base + add;
-      // done не трогаем
       if (rem > 0) rem--;
     }
+
     saveMonthData(st.ym, st.monthData);
     refreshAll(true);
   });
