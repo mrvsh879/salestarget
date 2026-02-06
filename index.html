@@ -11,7 +11,7 @@
     <header class="top">
       <div>
         <h1>План месяца</h1>
-        <p class="sub">Считает остаток и дневную норму с учетом выходных (Сб/Вс) + детализация по командам.</p>
+        <p class="sub">План/остаток/нужно в день + команды + календарь с дневной нормой.</p>
       </div>
       <div class="topActions">
         <button id="btnExport" class="btn ghost">Экспорт JSON</button>
@@ -47,18 +47,22 @@
           <input id="monthDone" type="number" min="0" step="1" placeholder="Напр. 45" />
           <button id="btnSaveDone" class="btn">Сохранить</button>
         </div>
-        <div class="hint">Можно вести прогресс — он тоже сохранится.</div>
+        <div class="hint">Можно вести вручную или автоматически из календаря (см. ниже).</div>
       </div>
 
       <div class="field">
-        <label>Настройки расчета</label>
+        <label>Настройки</label>
         <div class="row">
           <label class="check">
             <input id="includeWeekends" type="checkbox" />
             <span>Считать выходные рабочими</span>
           </label>
+          <label class="check">
+            <input id="doneFromCalendar" type="checkbox" />
+            <span>Факт из календаря</span>
+          </label>
         </div>
-        <div class="hint">По умолчанию выходные не считаются.</div>
+        <div class="hint">Если “Факт из календаря” включен — верхний “Факт” считается автоматически.</div>
       </div>
     </section>
 
@@ -92,6 +96,27 @@
       </div>
 
       <div class="note" id="calcNote"></div>
+    </section>
+
+    <section class="card">
+      <div class="cardHead">
+        <h2>Календарь (дневная норма)</h2>
+        <div class="right">
+          <button id="btnClearCalendar" class="btn ghost">Очистить факт месяца</button>
+        </div>
+      </div>
+      <div class="hint">
+        Клик по дню → введи “Сделано за день”. Календарь пересчитает “Нужно сегодня”, чтобы выйти на план к концу месяца.
+      </div>
+
+      <div class="calLegend">
+        <span class="dot wk"></span> Рабочий день
+        <span class="dot we"></span> Выходной
+        <span class="dot td"></span> Сегодня
+        <span class="dot ps"></span> Прошедший день
+      </div>
+
+      <div class="calendar" id="calendar"></div>
     </section>
 
     <section class="card">
@@ -134,7 +159,7 @@
     </footer>
   </div>
 
-  <!-- Modal -->
+  <!-- Modal: Add team -->
   <div class="modal" id="modal">
     <div class="modalBox">
       <div class="modalHead">
@@ -149,6 +174,26 @@
       <div class="modalActions">
         <button class="btn ghost" id="modalCancel">Отмена</button>
         <button class="btn" id="modalOk">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Day input -->
+  <div class="modal" id="dayModal">
+    <div class="modalBox">
+      <div class="modalHead">
+        <div class="modalTitle" id="dayModalTitle">День</div>
+        <button class="x" id="dayModalClose" aria-label="close">✕</button>
+      </div>
+      <div class="modalBody">
+        <label class="lbl">Сделано за день</label>
+        <input id="dayValue" class="inp" type="number" min="0" step="1" placeholder="0" />
+        <div class="hint" id="dayHint">—</div>
+      </div>
+      <div class="modalActions">
+        <button class="btn ghost" id="dayModalDelete">Удалить значение</button>
+        <button class="btn ghost" id="dayModalCancel">Отмена</button>
+        <button class="btn" id="dayModalSave">Сохранить</button>
       </div>
     </div>
   </div>
