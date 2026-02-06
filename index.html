@@ -11,11 +11,17 @@
     <header class="top">
       <div>
         <h1>План месяца</h1>
-        <p class="sub">План / остаток / нужно в день + календарь</p>
+        <p class="sub">Считает остаток и дневную норму с учетом выходных (Сб/Вс) + детализация по командам + календарь.</p>
+      </div>
+      <div class="topActions">
+        <button id="btnExport" class="btn ghost">Экспорт JSON</button>
+        <label class="btn ghost file">
+          Импорт JSON
+          <input id="importFile" type="file" accept="application/json" />
+        </label>
       </div>
     </header>
 
-    <!-- SETTINGS -->
     <section class="card grid2">
       <div class="field">
         <label>Месяц</label>
@@ -27,75 +33,172 @@
       </div>
 
       <div class="field">
-        <label>План месяца</label>
+        <label>План на месяц</label>
         <div class="row">
-          <input id="monthPlan" type="number" min="0" />
+          <input id="monthPlan" type="number" min="0" step="1" placeholder="Напр. 120" />
           <button id="btnSavePlan" class="btn">Сохранить</button>
         </div>
+        <div class="hint">План сохраняется для выбранного месяца.</div>
       </div>
 
       <div class="field">
-        <label>Факт</label>
+        <label>Факт (сделано)</label>
         <div class="row">
-          <input id="monthDone" type="number" min="0" />
+          <input id="monthDone" type="number" min="0" step="1" placeholder="Напр. 45" />
           <button id="btnSaveDone" class="btn">Сохранить</button>
         </div>
+        <div class="hint">Можно вести вручную или автоматически из календаря (см. ниже).</div>
       </div>
 
       <div class="field">
         <label>Настройки</label>
-        <label class="check">
-          <input id="includeWeekends" type="checkbox" />
-          Считать выходные рабочими
-        </label>
-        <label class="check">
-          <input id="doneFromCalendar" type="checkbox" />
-          Факт из календаря
-        </label>
+        <div class="row">
+          <label class="check">
+            <input id="includeWeekends" type="checkbox" />
+            <span>Считать выходные рабочими</span>
+          </label>
+          <label class="check">
+            <input id="doneFromCalendar" type="checkbox" />
+            <span>Факт из календаря</span>
+          </label>
+        </div>
+        <div class="hint">Если “Факт из календаря” включен — верхний “Факт” считается автоматически.</div>
       </div>
     </section>
 
-    <!-- TOTALS -->
     <section class="card">
-      <div class="kpis">
-        <div class="kpi"><div class="k">План</div><div class="v" id="kPlan">0</div></div>
-        <div class="kpi"><div class="k">Сделано</div><div class="v" id="kDone">0</div></div>
-        <div class="kpi"><div class="k">Осталось</div><div class="v" id="kLeft">0</div></div>
-        <div class="kpi"><div class="k">Рабочих дней</div><div class="v" id="kDaysLeft">0</div></div>
-        <div class="kpi"><div class="k">Нужно в день</div><div class="v" id="kPerDay">0</div></div>
+      <div class="cardHead">
+        <h2>Итоги</h2>
+        <div class="badge" id="statusBadge">—</div>
       </div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="k">План</div>
+          <div class="v" id="kPlan">0</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Сделано</div>
+          <div class="v" id="kDone">0</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Осталось</div>
+          <div class="v" id="kLeft">0</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Осталось рабочих дней</div>
+          <div class="v" id="kDaysLeft">0</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Нужно в день</div>
+          <div class="v" id="kPerDay">0</div>
+        </div>
+      </div>
+
       <div class="note" id="calcNote"></div>
     </section>
 
     <!-- CALENDAR -->
     <section class="card">
       <div class="cardHead">
-        <h2>Календарь</h2>
-        <div>
+        <h2>Календарь (дневная норма)</h2>
+        <div class="right">
           <button id="btnToggleCalendar" class="btn ghost">Скрыть календарь</button>
-          <button id="btnClearCalendar" class="btn ghost">Очистить</button>
+          <button id="btnClearCalendar" class="btn ghost">Очистить факт месяца</button>
         </div>
       </div>
 
       <div id="calendarPanel">
+        <div class="hint">
+          Клик по дню → введи “Сделано за день”. Календарь пересчитает “Нужно сегодня”, чтобы выйти на план к концу месяца.
+        </div>
+
+        <div class="calLegend">
+          <span class="dot wk"></span> Рабочий день
+          <span class="dot we"></span> Выходной
+          <span class="dot td"></span> Сегодня
+          <span class="dot ps"></span> Прошедший день
+        </div>
+
         <div class="calendar" id="calendar"></div>
       </div>
     </section>
+
+    <section class="card">
+      <div class="cardHead">
+        <h2>Команды: план / факт / остаток / нужно в день</h2>
+        <div class="right">
+          <button id="btnAddTeam" class="btn ghost">+ Добавить команду</button>
+        </div>
+      </div>
+
+      <div class="hint">
+        Вводи план и факт по каждой команде — система покажет остаток и дневную норму (на оставшиеся рабочие дни).
+        Данные сохраняются для выбранного месяца.
+      </div>
+
+      <div class="table" id="teamsTable"></div>
+
+      <div class="sumRow">
+        <div class="sumBox">
+          <div class="k">Сумма планов по командам</div>
+          <div class="v" id="teamsPlanSum">0</div>
+        </div>
+        <div class="sumBox">
+          <div class="k">Сумма факта по командам</div>
+          <div class="v" id="teamsDoneSum">0</div>
+        </div>
+        <div class="sumBox">
+          <div class="k">Разница (сумма планов - план месяца)</div>
+          <div class="v" id="teamsDiff">0</div>
+        </div>
+        <div class="sumActions">
+          <button id="btnAutoSplit" class="btn">Равномерно распределить планы</button>
+          <button id="btnSaveTeams" class="btn ghost">Сохранить команды</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span>Работает офлайн. Сохранение — в браузере (localStorage).</span>
+    </footer>
   </div>
 
-  <!-- MODAL -->
+  <!-- Modal: Add team -->
+  <div class="modal" id="modal">
+    <div class="modalBox">
+      <div class="modalHead">
+        <div class="modalTitle" id="modalTitle">Добавить команду</div>
+        <button class="x" id="modalClose" aria-label="close">✕</button>
+      </div>
+      <div class="modalBody">
+        <label class="lbl">Код команды (например: SK)</label>
+        <input id="newTeamCode" class="inp" maxlength="8" placeholder="CZ" />
+        <div class="hint">Только буквы/цифры/дефис/подчерк.</div>
+      </div>
+      <div class="modalActions">
+        <button class="btn ghost" id="modalCancel">Отмена</button>
+        <button class="btn" id="modalOk">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Day input -->
   <div class="modal" id="dayModal">
     <div class="modalBox">
       <div class="modalHead">
-        <div id="dayModalTitle"></div>
-        <button id="dayModalClose">✕</button>
+        <div class="modalTitle" id="dayModalTitle">День</div>
+        <button class="x" id="dayModalClose" aria-label="close">✕</button>
       </div>
       <div class="modalBody">
-        <input id="dayValue" type="number" min="0" />
+        <label class="lbl">Сделано за день</label>
+        <input id="dayValue" class="inp" type="number" min="0" step="1" placeholder="0" />
+        <div class="hint" id="dayHint">—</div>
       </div>
       <div class="modalActions">
-        <button id="dayModalDelete" class="btn ghost">Удалить</button>
-        <button id="dayModalSave" class="btn">Сохранить</button>
+        <button class="btn ghost" id="dayModalDelete">Удалить значение</button>
+        <button class="btn ghost" id="dayModalCancel">Отмена</button>
+        <button class="btn" id="dayModalSave">Сохранить</button>
       </div>
     </div>
   </div>
