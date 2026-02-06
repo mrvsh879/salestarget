@@ -1,9 +1,9 @@
 (() => {
   "use strict";
 
-  // --- DOM helpers
   const $ = (id) => document.getElementById(id);
 
+  // top controls
   const elMonth = $("month");
   const elYear = $("year");
   const elPlan = $("monthPlan");
@@ -11,6 +11,7 @@
   const elIncludeWeekends = $("includeWeekends");
   const elMonthMeta = $("monthMeta");
 
+  // totals
   const elKPlan = $("kPlan");
   const elKDone = $("kDone");
   const elKLeft = $("kLeft");
@@ -19,15 +20,17 @@
   const elStatusBadge = $("statusBadge");
   const elCalcNote = $("calcNote");
 
+  // teams
   const elTeamsTable = $("teamsTable");
-  const elTeamsSum = $("teamsSum");
+  const elTeamsPlanSum = $("teamsPlanSum");
+  const elTeamsDoneSum = $("teamsDoneSum");
   const elTeamsDiff = $("teamsDiff");
 
+  // buttons
   const btnSavePlan = $("btnSavePlan");
   const btnSaveDone = $("btnSaveDone");
   const btnSaveTeams = $("btnSaveTeams");
   const btnAutoSplit = $("btnAutoSplit");
-
   const btnAddTeam = $("btnAddTeam");
   const btnExport = $("btnExport");
   const importFile = $("importFile");
@@ -39,17 +42,15 @@
   const modalOk = $("modalOk");
   const newTeamCode = $("newTeamCode");
 
-  // --- storage keys
-  const KEY_TEAMS = "mvpMonthPlan.teams"; // array of team codes
-  const KEY_PREFS = "mvpMonthPlan.prefs"; // { includeWeekends: boolean }
-  const KEY_MONTH = (ym) => `mvpMonthPlan.month.${ym}`; // { plan, done, teams: {code: number}}
+  // storage
+  const KEY_TEAMS = "mvpMonthPlan.teams";
+  const KEY_PREFS = "mvpMonthPlan.prefs";
+  const KEY_MONTH = (ym) => `mvpMonthPlan.month.${ym}`;
 
-  // --- defaults
   const DEFAULT_TEAMS = ["CZ", "PL", "DE", "RO", "IT"];
 
-  // --- utils
   const pad2 = (n) => String(n).padStart(2, "0");
-  const ymKey = (y, m0) => `${y}-${pad2(m0 + 1)}`; // m0: 0-11
+  const ymKey = (y, m0) => `${y}-${pad2(m0 + 1)}`;
   const clamp0 = (n) => (Number.isFinite(n) && n > 0 ? n : 0);
 
   function loadJson(key, fallback) {
@@ -73,7 +74,6 @@
   }
 
   function daysInMonth(year, month0) {
-    // month0 0..11
     return new Date(year, month0 + 1, 0).getDate();
   }
 
@@ -94,19 +94,14 @@
 
   function countRemainingWorkdaysFromToday(year, month0, includeWeekends) {
     const now = new Date();
-    // normalize time
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const first = new Date(year, month0, 1);
     const last = new Date(year, month0, daysInMonth(year, month0));
 
-    // If selected month is in the past -> 0
     if (last < today) return 0;
-
-    // If selected month is in the future -> all workdays
     if (first > today) return countWorkdaysInMonth(year, month0, includeWeekends);
 
-    // Same month -> from today to end (including today)
     let c = 0;
     for (let d = today.getDate(); d <= last.getDate(); d++) {
       const dt = new Date(year, month0, d);
@@ -122,8 +117,8 @@
 
   function setBadge(text, type) {
     elStatusBadge.textContent = text;
-    const base = "badge";
-    elStatusBadge.className = base;
+    elStatusBadge.className = "badge";
+
     if (type === "ok") {
       elStatusBadge.style.borderColor = "rgba(55,224,140,.35)";
       elStatusBadge.style.background = "rgba(55,224,140,.08)";
@@ -143,7 +138,7 @@
     }
   }
 
-  // --- teams
+  // teams list
   function getTeams() {
     const teams = loadJson(KEY_TEAMS, null);
     if (Array.isArray(teams) && teams.length) return teams;
@@ -155,27 +150,7 @@
     saveJson(KEY_TEAMS, cleaned.length ? cleaned : DEFAULT_TEAMS);
   }
 
-  // --- month data
-  function getMonthData(ym, teams) {
-    const d = loadJson(KEY_MONTH(ym), null);
-    const base = {
-      plan: 0,
-      done: 0,
-      teams: {},
-    };
-    const out = Object.assign(base, d || {});
-    if (!out.teams || typeof out.teams !== "object") out.teams = {};
-    // ensure all teams exist in map
-    for (const t of teams) {
-      if (typeof out.teams[t] !== "number") out.teams[t] = 0;
-    }
-    // also remove unknown teams from map? keep them (for import safety)
-    return out;
-  }
-  function saveMonthData(ym, data) {
-    saveJson(KEY_MONTH(ym), data);
-  }
-
+  // prefs
   function getPrefs() {
     const p = loadJson(KEY_PREFS, { includeWeekends: false });
     if (typeof p.includeWeekends !== "boolean") p.includeWeekends = false;
@@ -185,7 +160,48 @@
     saveJson(KEY_PREFS, p);
   }
 
-  // --- UI build
+  // month data (with migration)
+  // monthData.teams[CODE] = { plan: number, done: number }
+  function getMonthData(ym, teams) {
+    const raw = loadJson(KEY_MONTH(ym), null);
+    const out = {
+      plan: 0,
+      done: 0,
+      teams: {}
+    };
+
+    if (raw && typeof raw === "object") {
+      out.plan = clamp0(Number(raw.plan));
+      out.done = clamp0(Number(raw.done));
+      out.teams = (raw.teams && typeof raw.teams === "object") ? raw.teams : {};
+    }
+
+    // MIGRATION:
+    // if teams[code] was a number -> interpret as plan, done=0
+    for (const t of teams) {
+      const v = out.teams[t];
+      if (typeof v === "number") {
+        out.teams[t] = { plan: clamp0(v), done: 0 };
+      } else if (v && typeof v === "object") {
+        out.teams[t] = {
+          plan: clamp0(Number(v.plan)),
+          done: clamp0(Number(v.done))
+        };
+      } else {
+        out.teams[t] = { plan: 0, done: 0 };
+      }
+    }
+
+    // persist migrated structure once
+    saveJson(KEY_MONTH(ym), out);
+    return out;
+  }
+
+  function saveMonthData(ym, data) {
+    saveJson(KEY_MONTH(ym), data);
+  }
+
+  // UI
   function fillMonthYearPickers() {
     const months = [
       "Январь","Февраль","Март","Апрель","Май","Июнь",
@@ -203,90 +219,17 @@
     elYear.value = String(yNow);
   }
 
-  function renderTeamsTable(teams, monthData) {
-    elTeamsTable.innerHTML = "";
-
-    const head = document.createElement("div");
-    head.className = "tr head";
-    head.innerHTML = `<div>Команда</div><div>План команды</div><div></div>`;
-    elTeamsTable.appendChild(head);
-
-    for (const code of teams) {
-      const tr = document.createElement("div");
-      tr.className = "tr";
-
-      const left = document.createElement("div");
-      left.className = "code";
-      left.textContent = code;
-
-      const mid = document.createElement("div");
-      const inp = document.createElement("input");
-      inp.type = "number";
-      inp.min = "0";
-      inp.step = "1";
-      inp.value = String(Math.round(monthData.teams[code] || 0));
-      inp.dataset.team = code;
-      inp.addEventListener("input", () => {
-        monthData.teams[code] = clamp0(Number(inp.value));
-        updateTeamsSumAndDiff(monthData);
-      });
-      mid.appendChild(inp);
-
-      const right = document.createElement("div");
-      const del = document.createElement("button");
-      del.className = "btn del";
-      del.textContent = "Удалить";
-      del.addEventListener("click", () => {
-        const curr = getTeams();
-        const next = curr.filter(t => t !== code);
-        if (!next.length) {
-          alert("Нельзя удалить последнюю команду.");
-          return;
-        }
-        if (!confirm(`Удалить команду ${code}?`)) return;
-
-        setTeams(next);
-
-        // also remove from current monthData map
-        delete monthData.teams[code];
-
-        refreshAll();
-      });
-      right.appendChild(del);
-
-      tr.appendChild(left);
-      tr.appendChild(mid);
-      tr.appendChild(right);
-      elTeamsTable.appendChild(tr);
-    }
-  }
-
-  function updateTeamsSumAndDiff(monthData) {
-    const sum = Object.values(monthData.teams || {}).reduce((a, b) => a + clamp0(Number(b)), 0);
-    elTeamsSum.textContent = fmtInt(sum);
-
-    const plan = clamp0(Number(monthData.plan));
-    const diff = sum - plan;
-    elTeamsDiff.textContent = (diff >= 0 ? "+" : "") + fmtInt(diff);
-
-    // badge hint for diff
-    if (plan === 0 && sum === 0) {
-      // no badge change
-      return;
-    }
-  }
-
   function renderMeta(year, month0, includeWeekends) {
     const dim = daysInMonth(year, month0);
     const workdays = countWorkdaysInMonth(year, month0, includeWeekends);
 
-    // weekends count (real Sat+Sun)
     let weekends = 0;
     for (let d = 1; d <= dim; d++) {
       if (isWeekend(new Date(year, month0, d))) weekends++;
     }
 
-    elMonthMeta.textContent = `Дней в месяце: ${dim} · Выходных (Сб/Вс): ${weekends} · Рабочих дней: ${workdays}${includeWeekends ? " (выходные включены)" : ""}`;
+    elMonthMeta.textContent =
+      `Дней: ${dim} · Выходных (Сб/Вс): ${weekends} · Рабочих: ${workdays}${includeWeekends ? " (выходные включены)" : ""}`;
   }
 
   function computeAndRenderTotals(year, month0, monthData, includeWeekends) {
@@ -301,36 +244,156 @@
     elKDone.textContent = fmtInt(done);
     elKLeft.textContent = fmtInt(left);
     elKDaysLeft.textContent = fmtInt(daysLeft);
-
-    if (!Number.isFinite(perDay)) {
-      elKPerDay.textContent = "∞";
-    } else {
-      elKPerDay.textContent = fmtInt(perDay);
-    }
+    elKPerDay.textContent = Number.isFinite(perDay) ? fmtInt(perDay) : (left > 0 ? "∞" : "0");
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const first = new Date(year, month0, 1);
     const last = new Date(year, month0, daysInMonth(year, month0));
 
-    // status
     if (plan === 0) {
       setBadge("Укажи план", "warn");
-      elCalcNote.textContent = "Задай план месяца — тогда появится точная дневная норма.";
+      elCalcNote.textContent = "Задай план месяца — тогда появится дневная норма и по командам тоже.";
     } else if (left === 0) {
       setBadge("План закрыт", "ok");
-      elCalcNote.textContent = "Остаток 0 — можно фиксировать новые цели или вести команды.";
+      elCalcNote.textContent = "Остаток 0. Если нужно — распределяй/фиксируй команды.";
     } else if (last < today) {
       setBadge("Месяц завершён", "bad");
-      elCalcNote.textContent = "Выбранный месяц уже прошёл. Остаток показан, но рабочих дней осталось 0.";
+      elCalcNote.textContent = "Выбранный месяц уже прошёл. Рабочих дней осталось 0.";
     } else if (daysLeft === 0) {
       setBadge("Нет рабочих дней", "bad");
-      elCalcNote.textContent = "В выбранном периоде не осталось рабочих дней (по текущим настройкам).";
+      elCalcNote.textContent = "По текущим настройкам не осталось рабочих дней в этом месяце.";
     } else {
       setBadge("В работе", "ok");
-      const per = Number.isFinite(perDay) ? Math.round(perDay) : null;
-      elCalcNote.textContent = `Чтобы закрыть план, нужно делать примерно ${per !== null ? per.toLocaleString("ru-RU") : "—"} в рабочий день до конца месяца.`;
+      elCalcNote.textContent =
+        `Чтобы закрыть общий план, нужно ~ ${Math.round(perDay).toLocaleString("ru-RU")} в рабочий день до конца месяца.`;
     }
+
+    return { daysLeft };
+  }
+
+  function pill(text, kind) {
+    const el = document.createElement("div");
+    el.className = "pill" + (kind ? ` ${kind}` : "");
+    el.textContent = text;
+    return el;
+  }
+
+  function renderTeamsTable(teams, monthData, daysLeft) {
+    elTeamsTable.innerHTML = "";
+
+    const head = document.createElement("div");
+    head.className = "tr head";
+    head.innerHTML = `
+      <div>Команда</div>
+      <div>План</div>
+      <div>Сделано</div>
+      <div>Осталось</div>
+      <div>Нужно/день</div>
+      <div></div>
+    `;
+    elTeamsTable.appendChild(head);
+
+    for (const code of teams) {
+      const rec = monthData.teams[code] || { plan: 0, done: 0 };
+      const teamPlan = clamp0(Number(rec.plan));
+      const teamDone = clamp0(Number(rec.done));
+      const teamLeft = Math.max(teamPlan - teamDone, 0);
+      const teamPerDay = daysLeft > 0 ? (teamLeft / daysLeft) : (teamLeft > 0 ? Infinity : 0);
+
+      const tr = document.createElement("div");
+      tr.className = "tr";
+
+      // code
+      const c = document.createElement("div");
+      c.className = "code";
+      c.textContent = code;
+
+      // plan input
+      const planBox = document.createElement("div");
+      const inpPlan = document.createElement("input");
+      inpPlan.type = "number";
+      inpPlan.min = "0";
+      inpPlan.step = "1";
+      inpPlan.value = String(Math.round(teamPlan));
+      inpPlan.addEventListener("input", () => {
+        monthData.teams[code].plan = clamp0(Number(inpPlan.value));
+        refreshAll(false); // re-render, but don't reset inputs from storage
+      });
+      planBox.appendChild(inpPlan);
+
+      // done input
+      const doneBox = document.createElement("div");
+      const inpDone = document.createElement("input");
+      inpDone.type = "number";
+      inpDone.min = "0";
+      inpDone.step = "1";
+      inpDone.value = String(Math.round(teamDone));
+      inpDone.addEventListener("input", () => {
+        monthData.teams[code].done = clamp0(Number(inpDone.value));
+        refreshAll(false);
+      });
+      doneBox.appendChild(inpDone);
+
+      // left pill
+      const leftBox = document.createElement("div");
+      leftBox.appendChild(pill(fmtInt(teamLeft), teamLeft === 0 ? "ok" : ""));
+
+      // per day pill
+      const perDayBox = document.createElement("div");
+      let perText = "0";
+      if (!Number.isFinite(teamPerDay)) perText = "∞";
+      else perText = fmtInt(teamPerDay);
+      perDayBox.appendChild(pill(perText, (teamLeft > 0 && daysLeft === 0) ? "bad" : ""));
+
+      // delete
+      const right = document.createElement("div");
+      const del = document.createElement("button");
+      del.className = "btn del";
+      del.textContent = "Удалить";
+      del.addEventListener("click", () => {
+        const curr = getTeams();
+        const next = curr.filter(t => t !== code);
+        if (!next.length) {
+          alert("Нельзя удалить последнюю команду.");
+          return;
+        }
+        if (!confirm(`Удалить команду ${code}?`)) return;
+
+        setTeams(next);
+        delete monthData.teams[code];
+        saveMonthData(window.__MVP__.ym, monthData);
+        refreshAll(true);
+      });
+      right.appendChild(del);
+
+      tr.appendChild(c);
+      tr.appendChild(planBox);
+      tr.appendChild(doneBox);
+      tr.appendChild(leftBox);
+      tr.appendChild(perDayBox);
+      tr.appendChild(right);
+
+      elTeamsTable.appendChild(tr);
+    }
+  }
+
+  function updateTeamsSums(monthData, monthPlan) {
+    let planSum = 0;
+    let doneSum = 0;
+
+    for (const v of Object.values(monthData.teams || {})) {
+      if (v && typeof v === "object") {
+        planSum += clamp0(Number(v.plan));
+        doneSum += clamp0(Number(v.done));
+      }
+    }
+
+    elTeamsPlanSum.textContent = fmtInt(planSum);
+    elTeamsDoneSum.textContent = fmtInt(doneSum);
+
+    const diff = planSum - clamp0(Number(monthPlan));
+    elTeamsDiff.textContent = (diff >= 0 ? "+" : "") + fmtInt(diff);
   }
 
   function currentSelection() {
@@ -339,7 +402,7 @@
     return { year, month0, ym: ymKey(year, month0) };
   }
 
-  function refreshAll() {
+  function refreshAll(resetFromStorage = true) {
     const teams = getTeams();
     const prefs = getPrefs();
 
@@ -348,16 +411,22 @@
     const { year, month0, ym } = currentSelection();
     const monthData = getMonthData(ym, teams);
 
-    elPlan.value = String(Math.round(monthData.plan || 0));
-    elDone.value = String(Math.round(monthData.done || 0));
+    if (resetFromStorage) {
+      elPlan.value = String(Math.round(monthData.plan || 0));
+      elDone.value = String(Math.round(monthData.done || 0));
+    } else {
+      // keep current top inputs, but sync into monthData
+      monthData.plan = clamp0(Number(elPlan.value));
+      monthData.done = clamp0(Number(elDone.value));
+    }
 
     renderMeta(year, month0, prefs.includeWeekends);
-    computeAndRenderTotals(year, month0, monthData, prefs.includeWeekends);
 
-    renderTeamsTable(teams, monthData);
-    updateTeamsSumAndDiff(monthData);
+    const { daysLeft } = computeAndRenderTotals(year, month0, monthData, prefs.includeWeekends);
 
-    // store current working dataset in window for button handlers
+    renderTeamsTable(teams, monthData, daysLeft);
+    updateTeamsSums(monthData, monthData.plan);
+
     window.__MVP__ = { teams, prefs, year, month0, ym, monthData };
   }
 
@@ -370,15 +439,15 @@
     modal.classList.remove("show");
   }
 
-  // --- events
-  elMonth.addEventListener("change", refreshAll);
-  elYear.addEventListener("change", refreshAll);
+  // events
+  elMonth.addEventListener("change", () => refreshAll(true));
+  elYear.addEventListener("change", () => refreshAll(true));
 
   elIncludeWeekends.addEventListener("change", () => {
     const prefs = getPrefs();
     prefs.includeWeekends = !!elIncludeWeekends.checked;
     savePrefs(prefs);
-    refreshAll();
+    refreshAll(true);
   });
 
   btnSavePlan.addEventListener("click", () => {
@@ -386,7 +455,7 @@
     if (!st) return;
     st.monthData.plan = clamp0(Number(elPlan.value));
     saveMonthData(st.ym, st.monthData);
-    refreshAll();
+    refreshAll(true);
   });
 
   btnSaveDone.addEventListener("click", () => {
@@ -394,16 +463,16 @@
     if (!st) return;
     st.monthData.done = clamp0(Number(elDone.value));
     saveMonthData(st.ym, st.monthData);
-    refreshAll();
+    refreshAll(true);
   });
 
   btnSaveTeams.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st) return;
-    // already live-updated in monthData; just persist
+    // monthData already updated live
     saveMonthData(st.ym, st.monthData);
-    alert("Распределение сохранено.");
-    refreshAll();
+    alert("Команды сохранены.");
+    refreshAll(true);
   });
 
   btnAutoSplit.addEventListener("click", () => {
@@ -414,47 +483,43 @@
       alert("Сначала укажи план месяца.");
       return;
     }
-    const teams = st.teams;
-    const base = Math.floor(plan / teams.length);
-    let rem = plan - base * teams.length;
-    for (const t of teams) {
-      st.monthData.teams[t] = base + (rem > 0 ? 1 : 0);
+    const t = st.teams;
+    const base = Math.floor(plan / t.length);
+    let rem = plan - base * t.length;
+
+    for (const code of t) {
+      const add = rem > 0 ? 1 : 0;
+      st.monthData.teams[code].plan = base + add;
+      // done не трогаем
       if (rem > 0) rem--;
     }
     saveMonthData(st.ym, st.monthData);
-    refreshAll();
+    refreshAll(true);
   });
 
   btnAddTeam.addEventListener("click", openModal);
   modalClose.addEventListener("click", closeModal);
   modalCancel.addEventListener("click", closeModal);
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeModal();
-  });
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 
   modalOk.addEventListener("click", () => {
     const code = normalizeTeamCode(newTeamCode.value);
-    if (!code) {
-      alert("Введите код команды.");
-      return;
-    }
+    if (!code) { alert("Введите код команды."); return; }
+
     const teams = getTeams();
-    if (teams.includes(code)) {
-      alert("Такая команда уже есть.");
-      return;
-    }
+    if (teams.includes(code)) { alert("Такая команда уже есть."); return; }
+
     teams.push(code);
     setTeams(teams);
 
-    // add to current month map too
     const st = window.__MVP__;
     if (st) {
-      st.monthData.teams[code] = 0;
+      st.monthData.teams[code] = { plan: 0, done: 0 };
       saveMonthData(st.ym, st.monthData);
     }
 
     closeModal();
-    refreshAll();
+    refreshAll(true);
   });
 
   // export/import
@@ -462,7 +527,6 @@
     const teams = getTeams();
     const prefs = getPrefs();
 
-    // export all months stored under prefix
     const all = { teams, prefs, months: {} };
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -494,17 +558,16 @@
 
       if (data && typeof data === "object") {
         if (Array.isArray(data.teams)) setTeams(data.teams);
-        if (data.prefs && typeof data.prefs === "object") savePrefs({
-          includeWeekends: !!data.prefs.includeWeekends
-        });
-
+        if (data.prefs && typeof data.prefs === "object") {
+          savePrefs({ includeWeekends: !!data.prefs.includeWeekends });
+        }
         if (data.months && typeof data.months === "object") {
           for (const [ym, val] of Object.entries(data.months)) {
             saveJson(KEY_MONTH(ym), val);
           }
         }
         alert("Импорт выполнен.");
-        refreshAll();
+        refreshAll(true);
       } else {
         alert("Неверный формат JSON.");
       }
@@ -515,15 +578,11 @@
     }
   });
 
-  // init pickers
   function init() {
     fillMonthYearPickers();
-
-    // ensure defaults in storage
     getTeams();
     getPrefs();
-
-    refreshAll();
+    refreshAll(true);
   }
 
   init();
