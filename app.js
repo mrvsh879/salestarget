@@ -127,52 +127,38 @@
     return x.toLocaleString("ru-RU");
   }
 
-  function setBadge(text, type) {
-    elStatusBadge.textContent = text;
-    elStatusBadge.className = "badge";
-
-    if (type === "ok") {
-      elStatusBadge.style.borderColor = "rgba(55,224,140,.35)";
-      elStatusBadge.style.background = "rgba(55,224,140,.08)";
-      elStatusBadge.style.color = "#d7ffe9";
-    } else if (type === "warn") {
-      elStatusBadge.style.borderColor = "rgba(255,200,87,.35)";
-      elStatusBadge.style.background = "rgba(255,200,87,.08)";
-      elStatusBadge.style.color = "#ffe9b8";
-    } else if (type === "bad") {
-      elStatusBadge.style.borderColor = "rgba(255,92,122,.35)";
-      elStatusBadge.style.background = "rgba(255,92,122,.08)";
-      elStatusBadge.style.color = "#ffd6de";
-    } else {
-      elStatusBadge.style.borderColor = "var(--line)";
-      elStatusBadge.style.background = "rgba(0,0,0,.2)";
-      elStatusBadge.style.color = "var(--muted)";
+  function sumDailyForMonth(monthData, year, month0) {
+    const dim = daysInMonth(year, month0);
+    let s = 0;
+    for (let d = 1; d <= dim; d++) {
+      const k = ymdKey(year, month0, d);
+      s += clamp0(Number(monthData.daily?.[k]));
     }
+    return s;
   }
 
-  // teams list
   function getTeams() {
-    const teams = loadJson(KEY_TEAMS, null);
-    if (Array.isArray(teams) && teams.length) return teams;
-    saveJson(KEY_TEAMS, DEFAULT_TEAMS);
-    return [...DEFAULT_TEAMS];
+    const t = loadJson(KEY_TEAMS, null);
+    if (Array.isArray(t) && t.length) return t.map(normalizeTeamCode).filter(Boolean);
+    return DEFAULT_TEAMS.slice();
   }
-  function setTeams(list) {
-    const cleaned = Array.from(new Set(list.map(normalizeTeamCode))).filter(Boolean);
-    saveJson(KEY_TEAMS, cleaned.length ? cleaned : DEFAULT_TEAMS);
+  function setTeams(teams) {
+    saveJson(KEY_TEAMS, teams);
   }
 
-  // prefs
   function getPrefs() {
-    const p = loadJson(KEY_PREFS, {
+    const p = loadJson(KEY_PREFS, null);
+    const out = {
       includeWeekends: false,
       doneFromCalendar: true,
       calendarCollapsed: false
-    });
-    if (typeof p.includeWeekends !== "boolean") p.includeWeekends = false;
-    if (typeof p.doneFromCalendar !== "boolean") p.doneFromCalendar = true;
-    if (typeof p.calendarCollapsed !== "boolean") p.calendarCollapsed = false;
-    return p;
+    };
+    if (p && typeof p === "object") {
+      if (typeof p.includeWeekends === "boolean") out.includeWeekends = p.includeWeekends;
+      if (typeof p.doneFromCalendar === "boolean") out.doneFromCalendar = p.doneFromCalendar;
+      if (typeof p.calendarCollapsed === "boolean") out.calendarCollapsed = p.calendarCollapsed;
+    }
+    return out;
   }
   function savePrefs(p) {
     saveJson(KEY_PREFS, p);
@@ -235,77 +221,57 @@
 
   function renderMeta(year, month0, includeWeekends) {
     const dim = daysInMonth(year, month0);
-    const workdays = countWorkdaysInMonth(year, month0, includeWeekends);
+    const wd = countWorkdaysInMonth(year, month0, includeWeekends);
+    const name = elMonth.options[month0]?.textContent || "";
+    elMonthMeta.textContent = `${name} ${year}: дней ${dim}, рабочих (по настройкам) ${wd}.`;
+  }
 
-    let weekends = 0;
-    for (let d = 1; d <= dim; d++) {
-      if (isWeekend(new Date(year, month0, d))) weekends++;
-    }
-
-    elMonthMeta.textContent =
-      `Дней: ${dim} · Выходных (Сб/Вс): ${weekends} · Рабочих: ${workdays}${includeWeekends ? " (выходные включены)" : ""}`;
+  function currentSelection() {
+    const year = Number(elYear.value);
+    const month0 = Number(elMonth.value);
+    const ym = ymKey(year, month0);
+    return { year, month0, ym };
   }
 
   function computeAndRenderTotals(year, month0, monthData, includeWeekends) {
+    const now = new Date();
+    const isThisMonth = (now.getFullYear() === year && now.getMonth() === month0);
+    const today = isThisMonth ? now.getDate() : 1;
+
     const plan = clamp0(Number(monthData.plan));
     const done = clamp0(Number(monthData.done));
     const left = Math.max(plan - done, 0);
 
-    // remaining workdays from TODAY
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const first = new Date(year, month0, 1);
-    const last = new Date(year, month0, daysInMonth(year, month0));
-    let daysLeft = 0;
-
-    if (last < today) daysLeft = 0;
-    else if (first > today) daysLeft = countWorkdaysInMonth(year, month0, includeWeekends);
-    else daysLeft = countRemainingWorkdaysFromDate(year, month0, today.getDate(), includeWeekends);
-
-    const perDay = daysLeft > 0 ? left / daysLeft : (left > 0 ? Infinity : 0);
+    const startDay = isThisMonth ? today : 1;
+    const daysLeft = countRemainingWorkdaysFromDate(year, month0, startDay, includeWeekends);
+    const perDay = (left > 0 && daysLeft > 0) ? Math.ceil(left / daysLeft) : 0;
 
     elKPlan.textContent = fmtInt(plan);
     elKDone.textContent = fmtInt(done);
     elKLeft.textContent = fmtInt(left);
     elKDaysLeft.textContent = fmtInt(daysLeft);
-    elKPerDay.textContent = Number.isFinite(perDay) ? fmtInt(perDay) : (left > 0 ? "∞" : "0");
+    elKPerDay.textContent = plan === 0 ? "—" : fmtInt(perDay);
 
+    // status
+    let badge = "—";
+    if (plan === 0) badge = "Нет плана";
+    else if (left === 0) badge = "План закрыт ✅";
+    else badge = "В процессе";
+
+    elStatusBadge.textContent = badge;
+
+    // note
     if (plan === 0) {
-      setBadge("Укажи план", "warn");
-      elCalcNote.textContent = "Задай план месяца — календарь покажет дневную норму.";
+      elCalcNote.textContent = "Укажи “План на месяц”, чтобы посчитать дневную норму.";
     } else if (left === 0) {
-      setBadge("План закрыт", "ok");
-      elCalcNote.textContent = "Остаток 0 — всё закрыто.";
-    } else if (last < today) {
-      setBadge("Месяц завершён", "bad");
-      elCalcNote.textContent = "Месяц в прошлом. Рабочих дней осталось 0.";
-    } else if (daysLeft === 0) {
-      setBadge("Нет рабочих дней", "bad");
-      elCalcNote.textContent = "По настройкам не осталось рабочих дней.";
+      elCalcNote.textContent = "План выполнен. Можно начать следующий месяц или поднять план.";
     } else {
-      setBadge("В работе", "ok");
-      elCalcNote.textContent =
-        `Чтобы закрыть план, нужно ~ ${Math.round(perDay).toLocaleString("ru-RU")} в рабочий день до конца месяца.`;
+      elCalcNote.textContent = `Остаток ${fmtInt(left)}. До конца месяца осталось рабочих дней: ${fmtInt(daysLeft)}. Норма: ~${fmtInt(perDay)}/день.`;
     }
 
-    return { daysLeft };
+    return { daysLeft, perDay };
   }
 
-  function sumDailyForMonth(monthData, y, m0) {
-    const dim = daysInMonth(y, m0);
-    let s = 0;
-    for (let d = 1; d <= dim; d++) {
-      const k = ymdKey(y, m0, d);
-      const v = monthData.daily?.[k];
-      s += clamp0(Number(v));
-    }
-    return s;
-  }
-
-  // Calendar: "Нужно сегодня" рассчитываем так:
-  // leftAtStart = plan - sum(done for days < current day)
-  // remWork = workdays from day..end
-  // needToday = ceil(leftAtStart / remWork) для рабочих дней, иначе 0 (если выходные не рабочие)
   function renderCalendar(year, month0, monthData, includeWeekends) {
     elCalendar.innerHTML = "";
 
@@ -426,18 +392,7 @@
     elTeamsDoneSum.textContent = fmtInt(doneSum);
 
     const diff = planSum - clamp0(Number(monthData.plan));
-    elTeamsDiff.textContent = (diff >= 0 ? "+" : "") + fmtInt(diff);
-  }
-
-  function pillEl() {
-    const el = document.createElement("div");
-    el.className = "pill";
-    el.textContent = "0";
-    return el;
-  }
-  function setPill(el, value, kind = "") {
-    el.className = "pill" + (kind ? ` ${kind}` : "");
-    el.textContent = value;
+    elTeamsDiff.textContent = fmtInt(diff);
   }
 
   function renderTeamsTable(teams, monthData, daysLeft) {
@@ -448,7 +403,7 @@
     head.innerHTML = `
       <div>Команда</div>
       <div>План</div>
-      <div>Сделано</div>
+      <div>Факт</div>
       <div>Осталось</div>
       <div>Нужно/день</div>
       <div></div>
@@ -456,99 +411,65 @@
     elTeamsTable.appendChild(head);
 
     for (const code of teams) {
-      const tr = document.createElement("div");
-      tr.className = "tr";
-      const rec = monthData.teams[code] || (monthData.teams[code] = { plan: 0, done: 0 });
+      if (!monthData.teams[code]) monthData.teams[code] = { plan: 0, done: 0 };
 
-      const c = document.createElement("div");
-      c.className = "code";
-      c.textContent = code;
+      const row = document.createElement("div");
+      row.className = "tr";
 
-      const planBox = document.createElement("div");
-      const inpPlan = document.createElement("input");
-      inpPlan.type = "number";
-      inpPlan.min = "0";
-      inpPlan.step = "1";
-      inpPlan.value = String(Math.round(clamp0(Number(rec.plan))));
-      planBox.appendChild(inpPlan);
+      const plan = clamp0(Number(monthData.teams[code].plan));
+      const done = clamp0(Number(monthData.teams[code].done));
+      const left = Math.max(plan - done, 0);
+      const perDay = (left > 0 && daysLeft > 0) ? Math.ceil(left / daysLeft) : 0;
 
-      const doneBox = document.createElement("div");
-      const inpDone = document.createElement("input");
-      inpDone.type = "number";
-      inpDone.min = "0";
-      inpDone.step = "1";
-      inpDone.value = String(Math.round(clamp0(Number(rec.done))));
-      doneBox.appendChild(inpDone);
+      const pill = left === 0 && plan > 0 ? "pill ok" : (plan === 0 ? "pill" : "pill bad");
 
-      const leftBox = document.createElement("div");
-      const leftP = pillEl();
-      leftBox.appendChild(leftP);
+      row.innerHTML = `
+        <div class="code">${code}</div>
+        <div><input type="number" min="0" step="1" value="${Math.round(plan)}" data-code="${code}" data-field="plan" /></div>
+        <div><input type="number" min="0" step="1" value="${Math.round(done)}" data-code="${code}" data-field="done" /></div>
+        <div><div class="${pill}">${fmtInt(left)}</div></div>
+        <div><div class="pill">${plan === 0 ? "—" : fmtInt(perDay)}</div></div>
+        <div><button class="btn del" data-del="${code}">Удалить</button></div>
+      `;
 
-      const perDayBox = document.createElement("div");
-      const perP = pillEl();
-      perDayBox.appendChild(perP);
-
-      const right = document.createElement("div");
-      const del = document.createElement("button");
-      del.className = "btn del";
-      del.textContent = "Удалить";
-      right.appendChild(del);
-
-      tr.appendChild(c);
-      tr.appendChild(planBox);
-      tr.appendChild(doneBox);
-      tr.appendChild(leftBox);
-      tr.appendChild(perDayBox);
-      tr.appendChild(right);
-      elTeamsTable.appendChild(tr);
-
-      const recalcRow = () => {
-        const plan = clamp0(Number(monthData.teams[code].plan));
-        const done = clamp0(Number(monthData.teams[code].done));
-        const left = Math.max(plan - done, 0);
-        const per = daysLeft > 0 ? (left / daysLeft) : (left > 0 ? Infinity : 0);
-
-        setPill(leftP, fmtInt(left), left === 0 ? "ok" : "");
-        if (!Number.isFinite(per)) setPill(perP, "∞", "bad");
-        else setPill(perP, fmtInt(per), "");
-      };
-
-      inpPlan.addEventListener("input", () => {
-        monthData.teams[code].plan = clamp0(Number(inpPlan.value));
-        recalcRow();
-        updateTeamsSums(monthData);
-        saveMonthData(window.__MVP__.ym, monthData);
-      });
-
-      inpDone.addEventListener("input", () => {
-        monthData.teams[code].done = clamp0(Number(inpDone.value));
-        recalcRow();
-        updateTeamsSums(monthData);
-        saveMonthData(window.__MVP__.ym, monthData);
-      });
-
-      del.addEventListener("click", () => {
-        const curr = getTeams();
-        const next = curr.filter(t => t !== code);
-        if (!next.length) { alert("Нельзя удалить последнюю команду."); return; }
-        if (!confirm(`Удалить команду ${code}?`)) return;
-
-        setTeams(next);
-        delete monthData.teams[code];
-        saveMonthData(window.__MVP__.ym, monthData);
-        refreshAll(true);
-      });
-
-      recalcRow();
+      elTeamsTable.appendChild(row);
     }
 
-    updateTeamsSums(monthData);
-  }
+    // input listeners
+    elTeamsTable.querySelectorAll('input[type="number"]').forEach(inp => {
+      inp.addEventListener("input", () => {
+        const st = window.__MVP__;
+        if (!st) return;
+        const code = inp.getAttribute("data-code");
+        const field = inp.getAttribute("data-field");
+        if (!code || !field) return;
+        const v = clamp0(Number(inp.value));
+        st.monthData.teams[code][field] = v;
+        updateTeamsSums(st.monthData);
+      });
+    });
 
-  function currentSelection() {
-    const year = Number(elYear.value);
-    const month0 = Number(elMonth.value);
-    return { year, month0, ym: ymKey(year, month0) };
+    // delete listeners
+    elTeamsTable.querySelectorAll("button[data-del]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const code = btn.getAttribute("data-del");
+        if (!code) return;
+        if (!confirm(`Удалить команду ${code}?`)) return;
+
+        const teams = getTeams().filter(t => t !== code);
+        setTeams(teams);
+
+        const st = window.__MVP__;
+        if (st) {
+          delete st.monthData.teams[code];
+          saveMonthData(st.ym, st.monthData);
+        }
+
+        refreshAll(true);
+      });
+    });
+
+    updateTeamsSums(monthData);
   }
 
   function refreshAll(resetFromStorage = true) {
@@ -602,6 +523,7 @@
 
     const { daysLeft } = computeAndRenderTotals(year, month0, monthData, prefs.includeWeekends);
 
+    // only render calendar UI if not collapsed (optimization not required, but ok)
     // IMPORTANT: even if collapsed, calendar data still exists; we just hide panel.
     renderCalendar(year, month0, monthData, prefs.includeWeekends);
 
@@ -622,4 +544,233 @@
 
   function openDayModal(y, m0, d) {
     const st = window.__MVP__;
-    if (!st)
+    if (!st) return;
+
+    const k = ymdKey(y, m0, d);
+    __dayEditing = { y, m0, d, key: k };
+
+    const dateObj = new Date(y, m0, d);
+    const w = ["Вс","Пн","Вт","Ср","Чт","Пт","Сб"][dateObj.getDay()];
+    dayModalTitle.textContent = `${k} (${w})`;
+
+    const v = clamp0(Number(st.monthData.daily?.[k]));
+    dayValue.value = String(Math.round(v));
+
+    const weekend = isWeekend(dateObj);
+    const isWorkDay = st.prefs.includeWeekends ? true : !weekend;
+
+    dayHint.textContent = isWorkDay
+      ? "Это рабочий день по настройкам. Значение повлияет на дневную норму дальше."
+      : "Это выходной по настройкам. Можно записать факт, но “нужно/день” на выходные = 0 (если выходные не рабочие).";
+
+    dayModal.classList.add("show");
+    dayValue.focus();
+    dayValue.select();
+  }
+  function closeDayModal() {
+    dayModal.classList.remove("show");
+    __dayEditing = null;
+  }
+
+  // events
+  elMonth.addEventListener("change", () => refreshAll(true));
+  elYear.addEventListener("change", () => refreshAll(true));
+
+  elIncludeWeekends.addEventListener("change", () => {
+    const prefs = getPrefs();
+    prefs.includeWeekends = !!elIncludeWeekends.checked;
+    savePrefs(prefs);
+    refreshAll(true);
+  });
+
+  elDoneFromCalendar.addEventListener("change", () => {
+    const prefs = getPrefs();
+    prefs.doneFromCalendar = !!elDoneFromCalendar.checked;
+    savePrefs(prefs);
+    refreshAll(true);
+  });
+
+  // ✅ toggle calendar
+  btnToggleCalendar.addEventListener("click", () => {
+    const prefs = getPrefs();
+    prefs.calendarCollapsed = !prefs.calendarCollapsed;
+    savePrefs(prefs);
+    refreshAll(true);
+  });
+
+  btnSavePlan.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st) return;
+    st.monthData.plan = clamp0(Number(elPlan.value));
+    saveMonthData(st.ym, st.monthData);
+    refreshAll(true);
+  });
+
+  btnSaveDone.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st) return;
+    if (st.prefs.doneFromCalendar) {
+      alert("Факт считается из календаря. Выключи “Факт из календаря”, если хочешь вводить вручную.");
+      return;
+    }
+    st.monthData.done = clamp0(Number(elDone.value));
+    saveMonthData(st.ym, st.monthData);
+    refreshAll(true);
+  });
+
+  btnSaveTeams.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st) return;
+    saveMonthData(st.ym, st.monthData);
+    alert("Команды сохранены.");
+    refreshAll(true);
+  });
+
+  btnAutoSplit.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st) return;
+
+    const plan = clamp0(Number(st.monthData.plan));
+    if (plan <= 0) { alert("Сначала укажи план месяца."); return; }
+
+    const t = st.teams;
+    const base = Math.floor(plan / t.length);
+    let rem = plan - base * t.length;
+
+    for (const code of t) {
+      const add = rem > 0 ? 1 : 0;
+      st.monthData.teams[code].plan = base + add;
+      if (rem > 0) rem--;
+    }
+
+    saveMonthData(st.ym, st.monthData);
+    refreshAll(true);
+  });
+
+  // clear calendar for current month
+  btnClearCalendar.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st) return;
+    if (!confirm("Очистить все дневные значения за этот месяц?")) return;
+    st.monthData.daily = {};
+    saveMonthData(st.ym, st.monthData);
+    refreshAll(true);
+  });
+
+  // team modal
+  btnAddTeam.addEventListener("click", openModal);
+  modalClose.addEventListener("click", closeModal);
+  modalCancel.addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+
+  modalOk.addEventListener("click", () => {
+    const code = normalizeTeamCode(newTeamCode.value);
+    if (!code) { alert("Введите код команды."); return; }
+
+    const teams = getTeams();
+    if (teams.includes(code)) { alert("Такая команда уже есть."); return; }
+
+    teams.push(code);
+    setTeams(teams);
+
+    const st = window.__MVP__;
+    if (st) {
+      st.monthData.teams[code] = { plan: 0, done: 0 };
+      saveMonthData(st.ym, st.monthData);
+    }
+
+    closeModal();
+    refreshAll(true);
+  });
+
+  // day modal events
+  dayModalClose.addEventListener("click", closeDayModal);
+  dayModalCancel.addEventListener("click", closeDayModal);
+  dayModal.addEventListener("click", (e) => { if (e.target === dayModal) closeDayModal(); });
+
+  dayModalSave.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st || !__dayEditing) return;
+
+    const v = clamp0(Number(dayValue.value));
+    st.monthData.daily[__dayEditing.key] = v;
+
+    saveMonthData(st.ym, st.monthData);
+    closeDayModal();
+    refreshAll(true);
+  });
+
+  dayModalDelete.addEventListener("click", () => {
+    const st = window.__MVP__;
+    if (!st || !__dayEditing) return;
+
+    delete st.monthData.daily[__dayEditing.key];
+
+    saveMonthData(st.ym, st.monthData);
+    closeDayModal();
+    refreshAll(true);
+  });
+
+  // export/import
+  btnExport.addEventListener("click", () => {
+    const teams = getTeams();
+    const prefs = getPrefs();
+
+    const all = { teams, prefs, months: {} };
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith("mvpMonthPlan.month.")) {
+        const ym = k.replace("mvpMonthPlan.month.", "");
+        all.months[ym] = loadJson(k, {});
+      }
+    }
+
+    const blob = new Blob([JSON.stringify(all, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `month-plan-export-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 500);
+  });
+
+  importFile.addEventListener("change", async () => {
+    const file = importFile.files && importFile.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data || typeof data !== "object") throw new Error("Неверный JSON");
+
+      if (Array.isArray(data.teams)) setTeams(data.teams.map(normalizeTeamCode).filter(Boolean));
+      if (data.prefs && typeof data.prefs === "object") savePrefs(data.prefs);
+
+      if (data.months && typeof data.months === "object") {
+        for (const [ym, md] of Object.entries(data.months)) {
+          if (typeof ym === "string" && md && typeof md === "object") {
+            saveJson(KEY_MONTH(ym), md);
+          }
+        }
+      }
+
+      alert("Импорт выполнен.");
+      refreshAll(true);
+    } catch (e) {
+      alert("Ошибка импорта: " + (e && e.message ? e.message : String(e)));
+    } finally {
+      importFile.value = "";
+    }
+  });
+
+  // init
+  fillMonthYearPickers();
+  refreshAll(true);
+
+})();
