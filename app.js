@@ -25,7 +25,7 @@
   const elCalendar = $("calendar");
   const btnClearCalendar = $("btnClearCalendar");
 
-  // ✅ calendar toggle
+  // calendar toggle
   const btnToggleCalendar = $("btnToggleCalendar");
   const elCalendarPanel = $("calendarPanel");
 
@@ -71,7 +71,8 @@
   const pad2 = (n) => String(n).padStart(2, "0");
   const ymKey = (y, m0) => `${y}-${pad2(m0 + 1)}`;
   const ymdKey = (y, m0, d) => `${y}-${pad2(m0 + 1)}-${pad2(d)}`;
-  const clamp0 = (n) => (Number.isFinite(n) && n > 0 ? n : 0);
+
+  const clamp0 = (n) => (Number.isFinite(n) && n >= 0 ? n : 0); // ✅ allow 0 explicitly
 
   function loadJson(key, fallback) {
     try {
@@ -193,12 +194,33 @@
       }
     }
 
+    // ✅ IMPORTANT: never wipe existing daily accidentally — out.daily already loaded above
     saveJson(KEY_MONTH(ym), out);
     return out;
   }
 
   function saveMonthData(ym, data) {
     saveJson(KEY_MONTH(ym), data);
+  }
+
+  // ✅ "hard" persist: merge & save to avoid overwriting daily with stale empty object
+  function persistMonthDataSafe(ym, monthData) {
+    const stored = loadJson(KEY_MONTH(ym), null);
+    if (stored && typeof stored === "object") {
+      const merged = {
+        plan: clamp0(Number(monthData.plan)),
+        done: clamp0(Number(monthData.done)),
+        teams: (monthData.teams && typeof monthData.teams === "object") ? monthData.teams : (stored.teams || {}),
+        daily: {
+          ...(stored.daily && typeof stored.daily === "object" ? stored.daily : {}),
+          ...(monthData.daily && typeof monthData.daily === "object" ? monthData.daily : {})
+        }
+      };
+      saveMonthData(ym, merged);
+      return merged;
+    }
+    saveMonthData(ym, monthData);
+    return monthData;
   }
 
   // UI pickers
@@ -223,7 +245,8 @@
     const dim = daysInMonth(year, month0);
     const wd = countWorkdaysInMonth(year, month0, includeWeekends);
     const name = elMonth.options[month0]?.textContent || "";
-    elMonthMeta.textContent = `${name} ${year}: дней ${dim}, рабочих (по настройкам) ${wd}.`;
+    const ym = ymKey(year, month0);
+    elMonthMeta.textContent = `${name} ${year}: дней ${dim}, рабочих (по настройкам) ${wd}. [Ключ хранения: ${ym}]`;
   }
 
   function currentSelection() {
@@ -252,15 +275,12 @@
     elKDaysLeft.textContent = fmtInt(daysLeft);
     elKPerDay.textContent = plan === 0 ? "—" : fmtInt(perDay);
 
-    // status
     let badge = "—";
     if (plan === 0) badge = "Нет плана";
     else if (left === 0) badge = "План закрыт ✅";
     else badge = "В процессе";
-
     elStatusBadge.textContent = badge;
 
-    // note
     if (plan === 0) {
       elCalcNote.textContent = "Укажи “План на месяц”, чтобы посчитать дневную норму.";
     } else if (left === 0) {
@@ -280,7 +300,6 @@
 
     const dim = daysInMonth(year, month0);
 
-    // weekday header (Mon..Sun)
     const headers = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
     for (const h of headers) {
       const head = document.createElement("div");
@@ -291,7 +310,6 @@
       elCalendar.appendChild(head);
     }
 
-    // offset
     const firstDay = new Date(year, month0, 1);
     const js = firstDay.getDay(); // 0..6 Sun..Sat
     const mondayBased = js === 0 ? 7 : js; // 1..7 Mon..Sun
@@ -305,7 +323,6 @@
       elCalendar.appendChild(blank);
     }
 
-    // cumulative sums
     const doneBefore = new Array(dim + 2).fill(0);
     for (let d = 1; d <= dim; d++) {
       const k = ymdKey(year, month0, d);
@@ -369,9 +386,7 @@
       lines.appendChild(l3);
 
       cell.appendChild(lines);
-
       cell.addEventListener("click", () => openDayModal(year, month0, d));
-
       elCalendar.appendChild(cell);
     }
   }
@@ -435,7 +450,6 @@
       elTeamsTable.appendChild(row);
     }
 
-    // input listeners
     elTeamsTable.querySelectorAll('input[type="number"]').forEach(inp => {
       inp.addEventListener("input", () => {
         const st = window.__MVP__;
@@ -449,7 +463,6 @@
       });
     });
 
-    // delete listeners
     elTeamsTable.querySelectorAll("button[data-del]").forEach(btn => {
       btn.addEventListener("click", () => {
         const code = btn.getAttribute("data-del");
@@ -462,7 +475,7 @@
         const st = window.__MVP__;
         if (st) {
           delete st.monthData.teams[code];
-          saveMonthData(st.ym, st.monthData);
+          persistMonthDataSafe(st.ym, st.monthData);
         }
 
         refreshAll(true);
@@ -479,7 +492,6 @@
     elIncludeWeekends.checked = !!prefs.includeWeekends;
     elDoneFromCalendar.checked = !!prefs.doneFromCalendar;
 
-    // ✅ apply calendar collapsed state
     if (prefs.calendarCollapsed) {
       elCalendarPanel.classList.add("hidden");
       btnToggleCalendar.textContent = "Показать календарь";
@@ -506,7 +518,6 @@
       if (!prefs.doneFromCalendar) monthData.done = clamp0(Number(elDone.value));
     }
 
-    // if doneFromCalendar -> overwrite monthData.done from daily sum
     if (prefs.doneFromCalendar) {
       const s = sumDailyForMonth(monthData, year, month0);
       monthData.done = s;
@@ -516,17 +527,14 @@
       elDone.removeAttribute("readonly");
     }
 
-    // save in case toggled
-    saveMonthData(ym, monthData);
+    // ✅ Safe persist (doesn't wipe daily)
+    monthData = persistMonthDataSafe(ym, monthData);
 
     renderMeta(year, month0, prefs.includeWeekends);
 
     const { daysLeft } = computeAndRenderTotals(year, month0, monthData, prefs.includeWeekends);
 
-    // only render calendar UI if not collapsed (optimization not required, but ok)
-    // IMPORTANT: even if collapsed, calendar data still exists; we just hide panel.
     renderCalendar(year, month0, monthData, prefs.includeWeekends);
-
     renderTeamsTable(teams, monthData, daysLeft);
 
     window.__MVP__ = { teams, prefs, year, month0, ym, monthData };
@@ -541,6 +549,7 @@
   function closeModal() { modal.classList.remove("show"); }
 
   let __dayEditing = null; // {y,m0,d,key}
+  let __dayAutosaveTimer = null;
 
   function openDayModal(y, m0, d) {
     const st = window.__MVP__;
@@ -567,9 +576,27 @@
     dayValue.focus();
     dayValue.select();
   }
+
   function closeDayModal() {
     dayModal.classList.remove("show");
     __dayEditing = null;
+    if (__dayAutosaveTimer) clearTimeout(__dayAutosaveTimer);
+    __dayAutosaveTimer = null;
+  }
+
+  // ✅ Auto-save day value (insurance)
+  function autosaveDayIfOpen() {
+    const st = window.__MVP__;
+    if (!st || !__dayEditing) return;
+
+    const v = clamp0(Number(dayValue.value));
+    st.monthData.daily[__dayEditing.key] = v;
+
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
+    // Update UI without closing modal
+    refreshAll(true);
+    // reopen modal with same day (refreshAll re-renders calendar; modal stays)
+    dayModal.classList.add("show");
   }
 
   // events
@@ -590,7 +617,6 @@
     refreshAll(true);
   });
 
-  // ✅ toggle calendar
   btnToggleCalendar.addEventListener("click", () => {
     const prefs = getPrefs();
     prefs.calendarCollapsed = !prefs.calendarCollapsed;
@@ -602,7 +628,7 @@
     const st = window.__MVP__;
     if (!st) return;
     st.monthData.plan = clamp0(Number(elPlan.value));
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     refreshAll(true);
   });
 
@@ -614,14 +640,14 @@
       return;
     }
     st.monthData.done = clamp0(Number(elDone.value));
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     refreshAll(true);
   });
 
   btnSaveTeams.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st) return;
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     alert("Команды сохранены.");
     refreshAll(true);
   });
@@ -643,17 +669,16 @@
       if (rem > 0) rem--;
     }
 
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     refreshAll(true);
   });
 
-  // clear calendar for current month
   btnClearCalendar.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st) return;
     if (!confirm("Очистить все дневные значения за этот месяц?")) return;
     st.monthData.daily = {};
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     refreshAll(true);
   });
 
@@ -676,7 +701,7 @@
     const st = window.__MVP__;
     if (st) {
       st.monthData.teams[code] = { plan: 0, done: 0 };
-      saveMonthData(st.ym, st.monthData);
+      st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     }
 
     closeModal();
@@ -688,6 +713,7 @@
   dayModalCancel.addEventListener("click", closeDayModal);
   dayModal.addEventListener("click", (e) => { if (e.target === dayModal) closeDayModal(); });
 
+  // ✅ save by button
   dayModalSave.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st || !__dayEditing) return;
@@ -695,20 +721,36 @@
     const v = clamp0(Number(dayValue.value));
     st.monthData.daily[__dayEditing.key] = v;
 
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     closeDayModal();
     refreshAll(true);
   });
 
+  // ✅ delete by button
   dayModalDelete.addEventListener("click", () => {
     const st = window.__MVP__;
     if (!st || !__dayEditing) return;
 
     delete st.monthData.daily[__dayEditing.key];
 
-    saveMonthData(st.ym, st.monthData);
+    st.monthData = persistMonthDataSafe(st.ym, st.monthData);
     closeDayModal();
     refreshAll(true);
+  });
+
+  // ✅ auto-save while typing (debounced)
+  dayValue.addEventListener("input", () => {
+    if (__dayAutosaveTimer) clearTimeout(__dayAutosaveTimer);
+    __dayAutosaveTimer = setTimeout(() => {
+      autosaveDayIfOpen();
+    }, 600);
+  });
+
+  // ✅ last-resort save on unload (morning reopen should keep)
+  window.addEventListener("beforeunload", () => {
+    const st = window.__MVP__;
+    if (!st) return;
+    persistMonthDataSafe(st.ym, st.monthData);
   });
 
   // export/import
